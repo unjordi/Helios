@@ -1,0 +1,76 @@
+name: Linux Build &amp; Test
+
+# First-party CI for Helios: builds the host on Ubuntu to validate that
+# develop and every PR/branch still compiles, then builds and runs the
+# googletest unit suite headless (xvfb). Uses the repo's own
+# scripts/linux_build.sh (the same script upstream Sunshine CI uses) for
+# deps + the main build, so the dependency list stays self-maintaining.
+#
+# CUDA/NVENC is skipped (no NVIDIA on the runner) and packaging is skipped
+# (this is a compile + test gate, not a release build).
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+      - 'feat/**'
+      - 'fix/**'
+      - 'chore/**'
+      - 'docs/**'
+  pull_request:
+    branches:
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: linux-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test-linux:
+    name: Build &amp; Test (Ubuntu 24.04, GCC)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build (deps + configure + compile)
+        run: |
+          chmod +x ./scripts/linux_build.sh
+          # Compile gate: skip CUDA (no NVIDIA on the runner) and packaging.
+          # Publisher flags are package-only branding, so they're omitted here.
+          # --skip-cleanup keeps the gcc alternatives in place for the test build below.
+          ./scripts/linux_build.sh \
+            --skip-cuda \
+            --skip-package \
+            --skip-cleanup \
+            --ubuntu-test-repo
+
+      - name: Confirm binary
+        run: |
+          ls -la build/sunshine* 2>/dev/null || { echo "::error::sunshine binary not found"; exit 1; }
+          file build/sunshine
+
+      # NOTE: the inherited googletest suite is currently bit-rotted — tests/unit/
+      # test_http_pairing.cpp is out of sync with the refactored pairing flow
+      # (clientpairingsecret lost its add_cert queue arg), so it doesn't compile.
+      # The steps below run but are non-blocking (continue-on-error) so the build
+      # gate stays meaningful while we fix the suite. Once it compiles & passes,
+      # drop continue-on-error to make tests a hard gate (and a required check).
+      - name: Build unit tests
+        continue-on-error: true
+        run: |
+          # Re-configure the existing build dir to also build the googletest suite
+          # (BUILD_TESTS defaults OFF), then compile just the test target.
+          cmake -B build -D BUILD_TESTS=ON
+          cmake --build build --target test_sunshine -j"$(nproc)"
+
+      - name: Run unit tests (headless via xvfb)
+        continue-on-error: true
+        run: |
+          test -x build/tests/test_sunshine || { echo "::warning::test_sunshine not built (suite bit-rotted); skipping"; exit 0; }
+          xvfb-run -a ./build/tests/test_sunshine --gtest_color=yes
