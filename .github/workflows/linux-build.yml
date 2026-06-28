@@ -1,0 +1,54 @@
+name: Linux Build Check
+
+# First-party CI for Helios: builds the host on Ubuntu to validate that
+# develop and every PR/branch still compiles. Uses the repo's own
+# scripts/linux_build.sh (the same script the upstream Sunshine CI uses),
+# so the dependency list stays first-party and self-maintaining.
+#
+# CUDA/NVENC is skipped (no NVIDIA on the runner) and packaging is skipped
+# (this is a compile gate, not a release build).
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+      - 'feat/**'
+      - 'fix/**'
+      - 'chore/**'
+      - 'docs/**'
+  pull_request:
+    branches:
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: linux-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux:
+    name: Build (Ubuntu 24.04, GCC)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build (deps + configure + compile)
+        run: |
+          chmod +x ./scripts/linux_build.sh
+          ./scripts/linux_build.sh \
+            --skip-cuda \
+            --skip-package \
+            --ubuntu-test-repo \
+            --publisher-name 'Helios' \
+            --publisher-website 'https://github.com/unjordi/Helios' \
+            --publisher-issue-url 'https://github.com/unjordi/Helios/issues'
+
+      - name: Confirm binary
+        run: |
+          ls -la build/sunshine* 2>/dev/null || { echo "::error::sunshine binary not found"; exit 1; }
+          file build/sunshine
