@@ -40,13 +40,12 @@ jobs:
       - name: Build (deps + configure + compile)
         run: |
           chmod +x ./scripts/linux_build.sh
+          # Compile gate: skip CUDA (no NVIDIA on the runner) and packaging.
+          # Publisher flags are package-only branding, so they're omitted here.
           ./scripts/linux_build.sh \
             --skip-cuda \
             --skip-package \
-            --ubuntu-test-repo \
-            --publisher-name 'Helios' \
-            --publisher-website 'https://github.com/unjordi/Helios' \
-            --publisher-issue-url 'https://github.com/unjordi/Helios/issues'
+            --ubuntu-test-repo
 
       - name: Confirm binary
         run: |
