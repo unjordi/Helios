@@ -2,210 +2,159 @@
 
 > **Helios** is a community-maintained fork of [**Apollo**](https://github.com/ClassicOldSong/Apollo) by [ClassicOldSong](https://github.com/ClassicOldSong) — which is itself a fork of [**Sunshine**](https://github.com/LizardByte/Sunshine) by [LizardByte](https://github.com/LizardByte). Full credit for the foundation goes to both upstream projects. Helios exists to keep the host actively maintained and extended, with a particular focus on **native Linux/Wayland virtual-display support**. Its sibling client is [**Selene**](https://github.com/unjordi/Selene).
 
-Helios is a self-hosted desktop stream host for [Artemis (Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android), [Selene](https://github.com/unjordi/Selene), and other Moonlight-protocol clients. Offering low latency, native client resolution, cloud gaming server capabilities with support for AMD, Intel, and Nvidia GPUs for hardware encoding. Software encoding is also available. A web UI is provided to allow configuration and client pairing from your favorite web browser. Pair from the local server or any mobile device.
+Helios is a self-hosted desktop stream host for [Selene](https://github.com/unjordi/Selene), [Artemis (Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android), and other Moonlight-protocol clients. It offers low latency, native client resolution, and hardware encoding on AMD, Intel, and Nvidia GPUs (software encoding is also available), with a web UI for configuration and client pairing from any browser.
 
 Major features:
 
-- [x] Built-in Virtual Display with HDR support that matches the resolution/framerate config of your client automatically
-- [x] Permission management for clients
+- [x] Per-client permission management
 - [x] Clipboard sync
-- [x] Commands for client connection/disconnection (checkout [Auto pause/resume games](https://github.com/ClassicOldSong/Apollo/wiki/Auto-pause-resume-games))
-- [x] Input only mode
+- [x] Commands on client connect/disconnect (e.g. [auto pause/resume games](https://github.com/ClassicOldSong/Apollo/wiki/Auto-pause-resume-games))
+- [x] Input-only mode
+- [x] Built-in Virtual Display with HDR that auto-matches the client's resolution/framerate — **Windows today; native Linux/Wayland support is this fork's flagship effort** (see [Focus](#focus-of-this-fork))
 
-## Usage
+## Focus of this fork
 
-Refer to LizardByte's documentation hosted on [Read the Docs](https://docs.lizardbyte.dev/projects/sunshine) for now.
+Helios prioritizes the **Linux/Wayland** host experience that upstream never fully landed, plus first-party docs. In order:
 
-Currently Virtual Display support is Windows only, Linux support is planned and will be implemented in the future.
+1. **Native virtual display on Linux** — render at the client's exact resolution without disturbing your physical monitor. Today this needs external workarounds (e.g. a dedicated `gamescope` session captured via KMS); the goal is to make it native, the way SudoVDA already works on Windows. Tracking: virtual display on Linux ([Apollo #1161](https://github.com/ClassicOldSong/Apollo/issues/1161), [PR #1477](https://github.com/ClassicOldSong/Apollo/pull/1477)), OpenGL-on-VD ([#1414](https://github.com/ClassicOldSong/Apollo/issues/1414)), headless ([#1427](https://github.com/ClassicOldSong/Apollo/issues/1427)).
+2. **First-party, Linux-first documentation** (below) instead of only pointing at upstream.
 
-## About Permission System
+Windows remains fully supported as inherited from Apollo/Sunshine — see [Downloads](#downloads).
 
-Check out the [Wiki](https://github.com/ClassicOldSong/Apollo/wiki/Permission-System)
+## Quick start (Linux)
+
+1. Install Helios (build [from source](#building-from-source-linux) for now; packaged releases are on the way).
+2. Start the service:
+   ```bash
+   systemctl --user enable --now apollo.service   # the binary is still named sunshine/apollo pending a binary rebrand
+   ```
+3. Open the web UI at **https://localhost:47990** and set your username/password on first run.
+4. Pair your client (Selene/Artemis/Moonlight): use the PIN flow in the UI, or enter the host address on the client.
 
 > [!NOTE]
-> The **FIRST** client paired with Apollo will be granted with FULL permissions, then other newly paired clients will only be granted with `View Streams` and `List Apps` permission. If you encounter `Permission Denied` error when trying to launch any app, go check the permission for that device and grant `Launch Apps` permission. The same applies to the situation when you find that you can't move mouse or type with keyboard on newly paired clients, grant the corresponding client `Mouse Input` and `Keyboard Input` permissions.
+> The **first** client paired gets **full** permissions; later clients only get `View Streams` + `List Apps`. If you hit `Permission Denied` launching an app, or can't use mouse/keyboard from a new client, grant that device the matching permission in the web UI. More: [Permission System wiki](https://github.com/ClassicOldSong/Apollo/wiki/Permission-System).
 
-## About Virtual Display
+## Building from source (Linux)
+
+First-party steps, verified on **Arch / CachyOS**. (For Debian/Fedora/Ubuntu the dependency names differ — see `packaging/linux/` and the upstream build reference linked under [Documentation](#documentation).)
+
+### Dependencies (Arch / CachyOS)
+
+```bash
+# Build tooling — upstream pins gcc-14 (a newer gcc, e.g. 16, currently breaks the build)
+sudo pacman -S --needed gcc14 cmake make nodejs npm git appstream appstream-glib desktop-file-utils
+
+# Runtime / library deps
+sudo pacman -S --needed avahi curl libayatana-appindicator libcap libdrm libevdev \
+  libmfx libnotify libpulse libva libx11 libxcb libxfixes libxrandr libxtst \
+  miniupnpc numactl openssl opus
+```
+
+### Build
+
+```bash
+git clone --recurse-submodules https://github.com/unjordi/Helios.git
+cd Helios
+
+cmake -S . -B build -Wno-dev \
+  -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_DOCS=OFF -DBUILD_TESTS=OFF -DBUILD_WERROR=OFF \
+  -DSUNSHINE_ENABLE_CUDA=OFF -DCUDA_FAIL_ON_MISSING=OFF
+
+make -C build -j"$(nproc)"
+```
+
+The binary lands at `build/sunshine`. Run it directly to test, or install with `make -C build install`.
+
+> [!TIP]
+> On NVIDIA, install `cuda` and drop the `-DSUNSHINE_ENABLE_CUDA=OFF` flag to enable NVENC. On AMD, `libva-mesa-driver` enables VAAPI encoding.
+
+## Documentation
+
+First-party documentation lives in this repo (the [Quick start](#quick-start-linux) and [build](#building-from-source-linux) sections above; more is being migrated). For deeper, not-yet-re-documented topics from the Sunshine era, the upstream [Sunshine docs](https://docs.lizardbyte.dev/projects/sunshine) remain a useful reference — but they are no longer the primary doc for Helios.
+
+## About the Virtual Display
+
+> [!NOTE]
+> **TL;DR** Treat your Selene/Artemis/Moonlight client like a dedicated PnP monitor.
+
+On **Windows**, Helios uses **SudoVDA** for the virtual display: auto resolution/framerate matching, created when the stream starts and removed when it ends. It assigns a **fixed identity per client**, so Windows remembers each device's display configuration natively. If no virtual display appears/disappears with the stream, suspect a driver misconfiguration or a leftover persistent virtual display.
 
 > [!WARNING]
-> ***It is highly recommend to remove any other virtual display solutions from your system and Apollo/Sunshine config, to reduce confusions and compatibility issues.***
+> Remove any other virtual-display solutions from your system and config to avoid conflicts.
 
-> [!NOTE]
-> **TL;DR** Just treat your Artemis/Moonlight client like a dedicated PnP monitor with Apollo.
-
-Apollo uses SudoVDA for virtual display. It features auto resolution and framerate matching for your Artemis/Moonlight clients. The virtual display is created upon the stream starts and removed once the app quits. **If you do not see a new virtual display added or removed when the stream starts or stops, there may be a driver misconfiguration, or another persistent virtual display might still be active.**
-
-The virtual display works just like any physically attached monitors with SudoVDA, there's completely no need for a super complicated solution to "fix" resolution configurations for your devices. Unlike all other solutions that reuses one identity or generate a random one each time for any virtual display sessions, **Apollo assigns a fixed identity for each Artemis/Moonlight client, so your display configuration will be automatically remembered and managed by Windows natively.**
-
-## Configuration for dual GPU laptops
-
-Apollo supports dual GPUs seamlessly.
-
-If you want to use your dGPU, just set the `Adapter Name` to your dGPU and enable `Headless mode` in `Audio/Video` tab, save and restart your computer. No dummy plug is needed any more, the image will be rendered and encoded directly from your dGPU.
+On **Linux/Wayland**, a native virtual display is **this fork's flagship work in progress** (see [Focus](#focus-of-this-fork)). Until it lands, render-at-client-resolution is achieved with external workarounds (e.g. a dedicated `gamescope` session captured via KMS).
 
 ## About HDR
 
-HDR starts supporting from Windows 11 23H2 and generally supported on 24H2. Some systems might not have HDR toggle on 23H2 and you just need to upgrade to 24H2. Any system lower than 23H2/Windows 10 will not have HDR option available.
+HDR quality depends almost entirely on the **client**. Color correction (ICC) is essentially a client-side job while streaming HDR, not the host's.
 
-> [!NOTE]
-> The below section is written for professional media workers. It doesn't stop you from enabling HDR if you know what you're doing and have deep understanding about how HDR works.
->
-> Apollo and SudoVDA can handle HDR just fine like any other streaming solutions.
->
-> If you have had good experience with HDR previously, you can safely ignore this section.
->
-> If you're curious, read on, but don't blame Apollo for poor HDR support.
-
-Whether HDR streaming looks good, it depends completely on your client.
-
-In short, ICC color correction should be totally useless while streaming HDR. It's your client's job to get HDR content displayed right, not the host. But in fact, it does affect the captured video stream and reflect changes on devices that can handle HDR correctly. On other devices that can't, the info is not respected at all.
-
-It's very complicated to explain why HDR is a total mess, and why enabling HDR makes the image appear dark/yellow. If it's your first time got HDR streaming working, and thinks HDR looks awful, you're right, but that's not Apollo's fault, it's your device that tone mapped SDR content to the maximum of the capability of its screen, there's no headroom for anything beyond that actual peak brightness for HDR. For details, please take a look [here](https://github.com/ClassicOldSong/Apollo/issues/164).
-
-For client devices, usually Apple products that have HDR capability can be trusted to have good results, other than that, your luck depends.
+On Windows, HDR requires Windows 11 23H2+ (24H2 recommended). On Linux/KDE, HDR capture is sensitive to the compositor version (e.g. dark-HDR regressions after some Plasma updates).
 
 <details>
-<summary>DEPRECATION ALERT</summary>
+<summary>HDR caveats (worth reading)</summary>
 
-Enabling HDR is **generally not recommended** with **ANY streaming solutions** at this moment, probably in the long term. The issue with **HDR itself** is huge, with loads of semi-incompatible standards, and massive variance between device configurations and capabilities. Game support for HDR is still choppy.
-
-SDR actually provides much more stable color accuracy, and are widely supported throughout most devices you can imagine. For games, art style can easily overcome the shortcoming with no HDR, and SDR has pretty standard workflows to ensure their visual performance. So HDR isn't *that* important in most of the cases.
+If HDR looks dark/washed-out, that's usually the client tone-mapping SDR content to its panel's peak brightness — not a Helios bug. HDR remains a messy space across standards and devices; SDR often gives more stable, predictable color. Enable HDR only if you understand the trade-offs. Background: [Apollo issue #164](https://github.com/ClassicOldSong/Apollo/issues/164).
 
 </details>
 
-## How to run multiple instances of Apollo for multiple virtual displays
+## Advanced
 
-Follow the instructions in the [Wiki](https://github.com/ClassicOldSong/Apollo/wiki/How-to-start-multiple-instances-of-Apollo).
+- **Dual-GPU laptops:** set `Adapter Name` to your dGPU and enable `Headless mode` in the `Audio/Video` tab, then restart — no dummy plug needed.
+- **Multiple instances / multiple virtual displays:** [wiki guide](https://github.com/ClassicOldSong/Apollo/wiki/How-to-start-multiple-instances-of-Apollo).
+- **Stuttering:** common causes and fixes in the [Stuttering Clinic](https://github.com/ClassicOldSong/Apollo/wiki/Stuttering-Clinic).
+- **FAQ:** [wiki](https://github.com/ClassicOldSong/Apollo/wiki/FAQ).
 
-## FAQ
-Moved to [WiKi](https://github.com/ClassicOldSong/Apollo/wiki/FAQ)
+## System requirements
 
-## Stuttering Clinic
-Here're some common causes and solutions for stutters: [WiKi](https://github.com/ClassicOldSong/Apollo/wiki/Stuttering-Clinic).
+> **Note:** work in progress — don't buy hardware based on this table.
 
-## Device specific setups
-- Pixel devices might not be able to use native resolution:
-  - Change the device resolution to Max: https://github.com/ClassicOldSong/Apollo/issues/700
+| Component | Minimum |
+|-----------|---------|
+| GPU | AMD: VCE 1.0+ · Intel: VAAPI-compatible · Nvidia: NVENC-capable |
+| CPU | AMD Ryzen 3 / Intel Core i3 or higher |
+| RAM | 4 GB+ |
+| OS | Windows 10+ · macOS 12+ · Linux: Debian 11+, Fedora 39+, Ubuntu 22.04+ |
+| Network | 5 GHz 802.11ac (host & client) |
 
-## System Requirements
-
-> **Warning**: This table is a work in progress. Do not purchase hardware based on this.
-
-**Minimum Requirements**
-
-| **Component** | **Description** |
-|---------------|-----------------|
-| GPU           | AMD: VCE 1.0 or higher, see: [obs-amd hardware support](https://github.com/obsproject/obs-amd-encoder/wiki/Hardware-Support) |
-|               | Intel: VAAPI-compatible, see: [VAAPI hardware support](https://www.intel.com/content/www/us/en/developer/articles/technical/linuxmedia-vaapi.html) |
-|               | Nvidia: NVENC enabled cards, see: [nvenc support matrix](https://developer.nvidia.com/video-encode-and-decode-gpu-support-matrix-new) |
-| CPU           | AMD: Ryzen 3 or higher |
-|               | Intel: Core i3 or higher |
-| RAM           | 4GB or more |
-| OS            | Windows: 10+ (Windows Server requires [manual installation](https://github.com/nefarius/ViGEmBus/issues/153) for gamepad support) |
-|               | macOS: 12+ |
-|               | Linux/Debian: 11 (bullseye) |
-|               | Linux/Fedora: 39+ |
-|               | Linux/Ubuntu: 22.04+ (jammy) |
-| Network       | Host: 5GHz, 802.11ac |
-|               | Client: 5GHz, 802.11ac |
-
-**4k Suggestions**
-
-| **Component** | **Description** |
-|---------------|-----------------|
-| GPU           | AMD: Video Coding Engine 3.1 or higher |
-|               | Intel: HD Graphics 510 or higher |
-|               | Nvidia: GeForce GTX 1080 or higher |
-| CPU           | AMD: Ryzen 5 or higher |
-|               | Intel: Core i5 or higher |
-| Network       | Host: CAT5e ethernet or better |
-|               | Client: CAT5e ethernet or better |
-
-**HDR Suggestions**
-
-| **Component** | **Description** |
-|---------------|-----------------|
-| GPU           | AMD: Video Coding Engine 3.4 or higher |
-|               | Intel: UHD Graphics 730 or higher |
-|               | Nvidia: Pascal-based GPU (GTX 10-series) or higher |
-| CPU           | AMD: todo |
-|               | Intel: todo |
-| Network       | Host: CAT5e ethernet or better |
-|               | Client: CAT5e ethernet or better |
+For 4K/HDR, prefer wired CAT5e+ and a newer GPU (AMD VCE 3.4+, Intel UHD 730+, Nvidia Pascal/GTX 10-series+).
 
 ## Integrations
 
-SudoVDA: Virtual Display Adapter Driver used in Apollo
-
-[Artemis](https://github.com/ClassicOldSong/moonlight-android): Integrated Virtual Display options control from client side
-
-**NOTE**: Artemis currently supports Android only. Other platforms will come later.
-
-## Support
-
-Currently support is only provided via GitHub Issues/Discussions.
-
-No real time chat support will ever be provided for Apollo and Artemis. Including but not limited to:
-
-- Discord
-- Telegram
-- Whatsapp
-- QQ
-- WeChat 
-
-> When there's a chat, there're dramas. -- Confucius
+- **[Selene](https://github.com/unjordi/Selene)** — Helios' sibling desktop client (Windows/macOS/Linux/Steam Deck).
+- **SudoVDA** — the Virtual Display Adapter driver used on Windows.
+- **[Artemis (Android)](https://github.com/ClassicOldSong/moonlight-android)** — Android client with integrated virtual-display controls.
 
 ## Downloads
 
-### Direct Download
+- **Build from source (Linux):** see [above](#building-from-source-linux) (recommended for now).
+- **Releases:** [github.com/unjordi/Helios/releases](https://github.com/unjordi/Helios/releases) (packaged builds are on the way).
 
-**Recommended**
+<details>
+<summary>Windows (inherited from Apollo)</summary>
 
-[Releases](https://github.com/ClassicOldSong/Apollo/releases)
-
-### WinGet
-
-**Note:** Community maintained
-
-In an elevated PowerShell window, run
+The upstream Apollo packages still work on Windows. In an elevated PowerShell:
 
 ```pwsh
 winget install ClassicOldSong.Apollo
-
+# or
+choco upgrade apollo -y
 ```
 
-You'll need WinGet installed first.
+Both are community-maintained. Native Helios Windows packages will follow.
 
-### Chocolatey
+</details>
 
-**Note:** Community maintained
+## Support
 
-You can also install the apollo streaming server with chocolatey.
+Support is via GitHub **Issues** and **Discussions** on this repo. No real-time chat channels are provided.
 
-Install Chocolatey if you don't have it, then run the following command in an elevated PowerShell/CMD window:
+## Acknowledgments
 
-```pwsh
-choco upgrade apollo -y 
-```
-
-Same command can be used to upgrade, add to a scheduled task to automate updates.
-
-See more details on the chocolatey package [here](https://community.chocolatey.org/packages/apollo)
-
-## Disclaimer
-
-I got kicked from Moonlight and Sunshine's Discord server and banned from Sunshine's GitHub repo literally for helping people out.
-
-This is what I got for finding a bug, opened an issue, getting no response, troubleshoot myself, fixed the issue myself, shared it by PR to the main repo hoping my efforts can help someone else during the maintenance gap.
-
-Yes, I'm going away. [Apollo](https://github.com/ClassicOldSong/Apollo) and [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android) will no longer be compatible with OG Sunshine and OG Moonlight eventually, but they'll work even better with much more carefully designed features.
-
-The Moonlight repo had stayed silent for 5 months, with nobody actually responding to issues, and people are getting totally no help besides the limited FAQ in their Discord server. I tried to answer issues and questions, solve problems within my ability but I got kicked out just for helping others.
-
-**PRs for feature improvements are welcomed here unlike the main repo, your ideas are more likely to be appreciated and your efforts are actually being respected. We welcome people who can and willing to share their efforts, helping yourselves and other people in need.**
-
-**Update**: They have contacted me and apologized for this incident, but the fact it **happened** still motivated me to start my own fork.
+- **[ClassicOldSong](https://github.com/ClassicOldSong)** — creator of Apollo (this fork's direct upstream) and Artemis.
+- **[LizardByte](https://github.com/LizardByte)** — for Sunshine, the foundation Apollo and Helios build on.
 
 ## License
 
-GPLv3
+GPLv3 — inherited from Sunshine. See [LICENSE](LICENSE).
