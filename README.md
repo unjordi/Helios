@@ -1,6 +1,8 @@
-# Apollo
+# Helios
 
-Apollo is a self-hosted desktop stream host for [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android). Offering low latency, native client resolution, cloud gaming server capabilities with support for AMD, Intel, and Nvidia GPUs for hardware encoding. Software encoding is also available. A web UI is provided to allow configuration and client pairing from your favorite web browser. Pair from the local server or any mobile device.
+> **Helios** is a community-maintained fork of [**Apollo**](https://github.com/ClassicOldSong/Apollo) by [ClassicOldSong](https://github.com/ClassicOldSong) — which is itself a fork of [**Sunshine**](https://github.com/LizardByte/Sunshine) by [LizardByte](https://github.com/LizardByte). Full credit for the foundation goes to both upstream projects. Helios exists to keep the host actively maintained and extended, with a particular focus on **native Linux/Wayland virtual-display support**. Its sibling client is [**Selene**](https://github.com/unjordi/Selene).
+
+Helios is a self-hosted desktop stream host for [Artemis (Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android), [Selene](https://github.com/unjordi/Selene), and other Moonlight-protocol clients. Offering low latency, native client resolution, cloud gaming server capabilities with support for AMD, Intel, and Nvidia GPUs for hardware encoding. Software encoding is also available. A web UI is provided to allow configuration and client pairing from your favorite web browser. Pair from the local server or any mobile device.
 
 Major features:
 
