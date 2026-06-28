@@ -55,14 +55,13 @@ jobs:
           ls -la build/sunshine* 2>/dev/null || { echo "::error::sunshine binary not found"; exit 1; }
           file build/sunshine
 
-      # NOTE: the inherited googletest suite is currently bit-rotted — tests/unit/
-      # test_http_pairing.cpp is out of sync with the refactored pairing flow
-      # (clientpairingsecret lost its add_cert queue arg), so it doesn't compile.
-      # The steps below run but are non-blocking (continue-on-error) so the build
-      # gate stays meaningful while we fix the suite. Once it compiles & passes,
-      # drop continue-on-error to make tests a hard gate (and a required check).
+      # The googletest suite now compiles (the bit-rot was fixed). The run step is
+      # still non-blocking (continue-on-error) ON PURPOSE: it includes security
+      # regression tests that are RED today and encode the desired (fixed) behavior
+      # — see SecurityCertValidation (GHSA-ph75-mgxh-mv57 / CVE-2026-32253). Once
+      # that's patched and those go green, flip continue-on-error to false and add
+      # this as a required status check on develop.
       - name: Build unit tests
-        continue-on-error: true
         run: |
           # Re-configure the existing build dir to also build the googletest suite
           # (BUILD_TESTS defaults OFF), then compile just the test target.
@@ -72,5 +71,8 @@ jobs:
       - name: Run unit tests (headless via xvfb)
         continue-on-error: true
         run: |
-          test -x build/tests/test_sunshine || { echo "::warning::test_sunshine not built (suite bit-rotted); skipping"; exit 0; }
-          xvfb-run -a ./build/tests/test_sunshine --gtest_color=yes
+          test -x build/tests/test_sunshine || { echo "::error::test_sunshine not built"; exit 1; }
+          # Curated deterministic + security suites (HW/platform tests need a real
+          # GPU/display; the pairing test is DISABLED pending state isolation).
+          xvfb-run -a ./build/tests/test_sunshine --gtest_color=yes \
+            --gtest_filter='ConfigParse.*:UtilHex.*:SecurityCertValidation.*:MdnsInstanceNameTests/*:FileHandler*'
