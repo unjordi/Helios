@@ -55,14 +55,11 @@ jobs:
           ls -la build/sunshine* 2>/dev/null || { echo "::error::sunshine binary not found"; exit 1; }
           file build/sunshine
 
-      # NOTE: the inherited googletest suite is currently bit-rotted — tests/unit/
-      # test_http_pairing.cpp is out of sync with the refactored pairing flow
-      # (clientpairingsecret lost its add_cert queue arg), so it doesn't compile.
-      # The steps below run but are non-blocking (continue-on-error) so the build
-      # gate stays meaningful while we fix the suite. Once it compiles & passes,
-      # drop continue-on-error to make tests a hard gate (and a required check).
+      # The googletest suite compiles and the curated suite passes (including the
+      # SecurityCertValidation regression for GHSA-ph75-mgxh-mv57 / CVE-2026-32253,
+      # now that the auth-bypass is fixed), so both steps are HARD gates. Good
+      # candidate to add as a required status check on develop.
       - name: Build unit tests
-        continue-on-error: true
         run: |
           # Re-configure the existing build dir to also build the googletest suite
           # (BUILD_TESTS defaults OFF), then compile just the test target.
@@ -70,7 +67,9 @@ jobs:
           cmake --build build --target test_sunshine -j"$(nproc)"
 
       - name: Run unit tests (headless via xvfb)
-        continue-on-error: true
         run: |
-          test -x build/tests/test_sunshine || { echo "::warning::test_sunshine not built (suite bit-rotted); skipping"; exit 0; }
-          xvfb-run -a ./build/tests/test_sunshine --gtest_color=yes
+          test -x build/tests/test_sunshine || { echo "::error::test_sunshine not built"; exit 1; }
+          # Curated deterministic + security suites (HW/platform tests need a real
+          # GPU/display; the pairing test is DISABLED pending state isolation).
+          xvfb-run -a ./build/tests/test_sunshine --gtest_color=yes \
+            --gtest_filter='ConfigParse.*:UtilHex.*:SecurityCertValidation.*:MdnsInstanceNameTests/*:FileHandler*'
