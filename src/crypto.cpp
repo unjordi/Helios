@@ -27,19 +27,19 @@ namespace crypto {
   }
 
   static int openssl_verify_cb(int ok, X509_STORE_CTX *ctx) {
-    int err_code = X509_STORE_CTX_get_error(ctx);
-
-    switch (err_code) {
-      // Expired or not-yet-valid certificates are fine. Sometimes Moonlight is running on embedded devices
-      // that don't have accurate clocks (or haven't yet synchronized by the time Moonlight first runs).
-      // This behavior also matches what GeForce Experience does.
-      case X509_V_ERR_CERT_NOT_YET_VALID:
-      case X509_V_ERR_CERT_HAS_EXPIRED:
-        return 1;
-
-      default:
-        return ok;
-    }
+    // SECURITY (GHSA-ph75-mgxh-mv57 / CVE-2026-32253): this callback used to
+    // force-accept (return 1) expired and not-yet-valid certificates "to tolerate
+    // embedded clients with inaccurate clocks". That let an attacker bypass client
+    // authentication by presenting an expired or not-yet-valid certificate.
+    // Certificate validity is now enforced: defer to OpenSSL's verdict.
+    //
+    // Pinned self-signed client certs (the normal case) are still accepted — that
+    // path is handled in cert_chain_t::verify(), which tolerates
+    // X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT / X509_V_ERR_INVALID_CA. Only the
+    // blanket acceptance of bad validity periods is removed here.
+    //
+    // NOTE: clients with badly-skewed clocks must sync time before pairing.
+    return ok;
   }
 
   /**

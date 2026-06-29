@@ -55,12 +55,10 @@ jobs:
           ls -la build/sunshine* 2>/dev/null || { echo "::error::sunshine binary not found"; exit 1; }
           file build/sunshine
 
-      # The googletest suite now compiles (the bit-rot was fixed). The run step is
-      # still non-blocking (continue-on-error) ON PURPOSE: it includes security
-      # regression tests that are RED today and encode the desired (fixed) behavior
-      # — see SecurityCertValidation (GHSA-ph75-mgxh-mv57 / CVE-2026-32253). Once
-      # that's patched and those go green, flip continue-on-error to false and add
-      # this as a required status check on develop.
+      # The googletest suite compiles and the curated suite passes (including the
+      # SecurityCertValidation regression for GHSA-ph75-mgxh-mv57 / CVE-2026-32253,
+      # now that the auth-bypass is fixed), so both steps are HARD gates. Good
+      # candidate to add as a required status check on develop.
       - name: Build unit tests
         run: |
           # Re-configure the existing build dir to also build the googletest suite
@@ -69,7 +67,6 @@ jobs:
           cmake --build build --target test_sunshine -j"$(nproc)"
 
       - name: Run unit tests (headless via xvfb)
-        continue-on-error: true
         run: |
           test -x build/tests/test_sunshine || { echo "::error::test_sunshine not built"; exit 1; }
           # Curated deterministic + security suites (HW/platform tests need a real

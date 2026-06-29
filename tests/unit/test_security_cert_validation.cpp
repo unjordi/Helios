@@ -2,13 +2,13 @@
  * @file tests/unit/test_security_cert_validation.cpp
  * @brief Security regression tests for client-certificate validation.
  *
- * Encodes the FIXED behavior for the authentication-bypass reported as
- * GHSA-ph75-mgxh-mv57 / CVE-2026-32253: crypto::cert_chain_t::verify() must
- * REJECT client certificates that are expired or not-yet-valid. The current
- * openssl_verify_cb (src/crypto.cpp) returns 1 for X509_V_ERR_CERT_HAS_EXPIRED
- * and X509_V_ERR_CERT_NOT_YET_VALID, so those two tests are EXPECTED TO FAIL
- * until the real upstream fix is ported. They are kept red on purpose to hold
- * the bar high and prevent the bypass from being forgotten.
+ * Regression tests for the authentication-bypass GHSA-ph75-mgxh-mv57 /
+ * CVE-2026-32253: crypto::cert_chain_t::verify() must REJECT client
+ * certificates that are expired or not-yet-valid. openssl_verify_cb
+ * (src/crypto.cpp) used to force-accept those, which allowed the bypass; it now
+ * defers to OpenSSL's verdict, so these tests pass and guard against a
+ * regression. (Authored red to demonstrate the live vulnerability, then turned
+ * green by the fix in the same change.)
  */
 #include "../tests_common.h"
 
@@ -73,8 +73,7 @@ TEST(SecurityCertValidation, AcceptsValidClientCert) {
   ASSERT_EQ(chain.verify(x.get(), out), nullptr) << "a valid client cert must be accepted";
 }
 
-// CVE-2026-32253: expired client certs must be REJECTED. EXPECTED TO FAIL today
-// (openssl_verify_cb returns 1 for X509_V_ERR_CERT_HAS_EXPIRED).
+// CVE-2026-32253: expired client certs must be REJECTED (now enforced).
 TEST(SecurityCertValidation, RejectsExpiredClientCert) {
   auto pem = make_self_signed_pem(-3600 * 48, -3600 * 24);  // expired ~1 day ago
   auto nc = make_named(pem);
@@ -87,8 +86,7 @@ TEST(SecurityCertValidation, RejectsExpiredClientCert) {
     << "expired client cert must be rejected (GHSA-ph75-mgxh-mv57 / CVE-2026-32253)";
 }
 
-// CVE-2026-32253: not-yet-valid client certs must be REJECTED. EXPECTED TO FAIL
-// today (openssl_verify_cb returns 1 for X509_V_ERR_CERT_NOT_YET_VALID).
+// CVE-2026-32253: not-yet-valid client certs must be REJECTED (now enforced).
 TEST(SecurityCertValidation, RejectsNotYetValidClientCert) {
   auto pem = make_self_signed_pem(3600 * 24, 3600 * 48);  // becomes valid tomorrow
   auto nc = make_named(pem);
