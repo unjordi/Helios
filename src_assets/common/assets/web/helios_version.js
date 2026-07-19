@@ -1,4 +1,4 @@
-class ApolloVersion {
+class HeliosVersion {
   constructor(release = null, version = null) {
     if (release) {
       this.release = release;
@@ -46,12 +46,12 @@ class ApolloVersion {
 
   isGreater(otherVersion, checkIncremental) {
     let otherVersionParts;
-    if (otherVersion instanceof ApolloVersion) {
+    if (otherVersion instanceof HeliosVersion) {
       otherVersionParts = otherVersion.versionParts;
     } else if (typeof otherVersion === 'string') {
       otherVersionParts = this.parseVersion(otherVersion);
     } else {
-      throw new Error('Invalid argument: otherVersion must be a ApolloVersion object or a version string');
+      throw new Error('Invalid argument: otherVersion must be a HeliosVersion object or a version string');
     }
 
     if (!this.versionParts || !otherVersionParts) {
@@ -68,4 +68,4 @@ class ApolloVersion {
   }
 }
 
-export default ApolloVersion;
+export default HeliosVersion;
