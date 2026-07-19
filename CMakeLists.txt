@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 # `cmake_path(CONVERT ... TO_NATIVE_PATH_LIST ...)` requires 3.20
 # todo - set this conditionally
 
-project(Apollo VERSION 0.0.0
+project(Helios VERSION 0.0.0
         DESCRIPTION "Self-hosted game stream host for Artemis"
         HOMEPAGE_URL "https://github.com/ClassicOldSong/Apollo")
 
