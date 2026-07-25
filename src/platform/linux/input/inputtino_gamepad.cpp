@@ -27,7 +27,7 @@ namespace platf::gamepad {
   };
 
   auto create_xbox_one() {
-    return inputtino::XboxOneJoypad::create({.name = "Sunshine X-Box One (virtual) pad",
+    return inputtino::XboxOneJoypad::create({.name = "Helios X-Box One (virtual) pad",
                                              // https://github.com/torvalds/linux/blob/master/drivers/input/joystick/xpad.c#L147
                                              .vendor_id = 0x045E,
                                              .product_id = 0x02EA,
@@ -35,7 +35,7 @@ namespace platf::gamepad {
   }
 
   auto create_switch() {
-    return inputtino::SwitchJoypad::create({.name = "Sunshine Nintendo (virtual) pad",
+    return inputtino::SwitchJoypad::create({.name = "Helios Nintendo (virtual) pad",
                                             // https://github.com/torvalds/linux/blob/master/drivers/hid/hid-ids.h#L981
                                             .vendor_id = 0x057e,
                                             .product_id = 0x2009,
@@ -50,7 +50,7 @@ namespace platf::gamepad {
       device_mac = std::format("02:00:00:00:00:{:02x}", globalIndex);
     }
 
-    return inputtino::PS5Joypad::create({.name = "Sunshine PS5 (virtual) pad", .vendor_id = 0x054C, .product_id = 0x0CE6, .version = 0x8111, .device_phys = device_mac, .device_uniq = device_mac});
+    return inputtino::PS5Joypad::create({.name = "Helios PS5 (virtual) pad", .vendor_id = 0x054C, .product_id = 0x0CE6, .version = 0x8111, .device_phys = device_mac, .device_uniq = device_mac});
   }
 
   int alloc(input_raw_t *raw, const gamepad_id_t &id, const gamepad_arrival_t &metadata, feedback_queue_t feedback_queue) {
