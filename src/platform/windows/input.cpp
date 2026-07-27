@@ -2,7 +2,16 @@
  * @file src/platform/windows/input.cpp
  * @brief Definitions for input handling on Windows.
  */
-#define WINVER 0x0A00
+#ifndef DOXYGEN
+  #define WINVER 0x0A00
+#endif
+#ifdef DOXYGEN
+  /**
+   * @def CALLBACK
+   * @brief Windows callback calling convention marker.
+   */
+  #define CALLBACK
+#endif
 
 // platform includes
 #include <Windows.h>
@@ -10,6 +19,7 @@
 // standard includes
 #include <cmath>
 #include <thread>
+#include <vector>
 
 // lib includes
 #include <ViGEm/Client.h>
@@ -22,6 +32,9 @@
 #include "src/logging.h"
 #include "src/platform/common.h"
 
+// Kept from Apollo/Helios: our MinGW toolchain may predate the mingw-w64 headers that
+// declare these (Sunshine dropped this shim in 875ad1d1 when it bumped its CI toolchain).
+// The declarations are identical to the ones in modern winuser.h, so a redeclaration is benign.
 #ifdef __MINGW32__
 // DECLARE_HANDLE(HSYNTHETICPOINTERDEVICE);
 WINUSERAPI HSYNTHETICPOINTERDEVICE WINAPI CreateSyntheticPointerDevice(POINTER_INPUT_TYPE pointerType, ULONG maxCount, POINTER_FEEDBACK_MODE mode);
@@ -32,8 +45,11 @@ WINUSERAPI VOID WINAPI DestroySyntheticPointerDevice(HSYNTHETICPOINTERDEVICE dev
 namespace platf {
   using namespace std::literals;
 
-  thread_local HDESK _lastKnownInputDesktop = nullptr;
+  thread_local HDESK _lastKnownInputDesktop = nullptr;  ///< Last known input desktop.
 
+  /**
+   * @brief Target touch port.
+   */
   constexpr touch_port_t target_touch_port {
     0,
     0,
@@ -41,9 +57,24 @@ namespace platf {
     65535
   };
 
+  /**
+   * @brief ViGEm client pointer released with `vigem_free`.
+   */
   using client_t = util::safe_ptr<_VIGEM_CLIENT_T, vigem_free>;
+  /**
+   * @brief ViGEm target pointer released with `vigem_target_free`.
+   */
   using target_t = util::safe_ptr<_VIGEM_TARGET_T, vigem_target_free>;
 
+  /**
+   * @brief Handle Xbox 360 virtual gamepad notification events.
+   *
+   * @param client ViGEm client.
+   * @param target ViGEm target.
+   * @param largeMotor Large motor strength.
+   * @param smallMotor Small motor strength.
+   * @param userdata User data pointer.
+   */
   void CALLBACK x360_notify(
     client_t::pointer client,
     target_t::pointer target,
@@ -53,6 +84,16 @@ namespace platf {
     void *userdata
   );
 
+  /**
+   * @brief Handle DualShock 4 virtual gamepad notification events.
+   *
+   * @param client ViGEm client.
+   * @param target ViGEm target.
+   * @param largeMotor Large motor strength.
+   * @param smallMotor Small motor strength.
+   * @param led_color Requested lightbar color.
+   * @param userdata User data pointer.
+   */
   void CALLBACK ds4_notify(
     client_t::pointer client,
     target_t::pointer target,
@@ -62,41 +103,62 @@ namespace platf {
     void *userdata
   );
 
+  /**
+   * @brief Last touch coordinates reported by a virtual gamepad.
+   */
   struct gp_touch_context_t {
-    uint8_t pointerIndex;
-    uint16_t x;
-    uint16_t y;
+    uint8_t pointerIndex;  ///< Pointer index.
+    uint16_t x;  ///< X.
+    uint16_t y;  ///< Y.
   };
 
+  /**
+   * @brief ViGEm target and report buffers for one virtual gamepad.
+   */
   struct gamepad_context_t {
-    target_t gp;
-    feedback_queue_t feedback_queue;
+    target_t gp;  ///< Gp.
+    feedback_queue_t feedback_queue;  ///< Feedback queue.
 
     union {
       XUSB_REPORT x360;
       DS4_REPORT_EX ds4;
-    } report;
+    } report;  ///< Current HID report for the virtual controller..
 
     // Map from pointer ID to pointer index
-    std::map<uint32_t, uint8_t> pointer_id_map;
-    uint8_t available_pointers;
+    std::map<uint32_t, uint8_t> pointer_id_map;  ///< Pointer ID map.
+    uint8_t available_pointers;  ///< Available pointers.
 
-    uint8_t client_relative_index;
+    uint8_t client_relative_index;  ///< Client relative index.
 
-    thread_pool_util::ThreadPool::task_id_t repeat_task {};
-    std::chrono::steady_clock::time_point last_report_ts;
+    thread_pool_util::ThreadPool::task_id_t repeat_task {};  ///< Repeat task.
+    std::chrono::steady_clock::time_point last_report_ts;  ///< Last report ts.
 
-    gamepad_feedback_msg_t last_rumble;
-    gamepad_feedback_msg_t last_rgb_led;
+    gamepad_feedback_msg_t last_rumble;  ///< Last rumble.
+    gamepad_feedback_msg_t last_rgb_led;  ///< Last RGB led.
   };
 
-  constexpr float EARTH_G = 9.80665f;
+  constexpr float EARTH_G = 9.80665f;  ///< Meters per second squared represented by one gravity unit.
 
+/**
+ * @def MPS2_TO_DS4_ACCEL(x)
+ * @brief Macro for MPS2 TO DS4 ACCEL.
+ */
 #define MPS2_TO_DS4_ACCEL(x) (int32_t) (((x) / EARTH_G) * 8192)
+/**
+ * @def DPS_TO_DS4_GYRO(x)
+ * @brief Macro for DPS TO DS4 GYRO.
+ */
 #define DPS_TO_DS4_GYRO(x) (int32_t) ((x) * (1024 / 64))
 
+/**
+ * @def APPLY_CALIBRATION(val, bias, scale)
+ * @brief Macro for APPLY CALIBRATION.
+ */
 #define APPLY_CALIBRATION(val, bias, scale) (int32_t) (((float) (val) + (bias)) / (scale))
 
+  /**
+   * @brief DS4 touch unused.
+   */
   constexpr DS4_TOUCH ds4_touch_unused = {
     .bPacketCounter = 0,
     .bIsUpTrackingNum1 = 0x80,
@@ -106,6 +168,9 @@ namespace platf {
   };
 
   // See https://github.com/ViGEm/ViGEmBus/blob/22835473d17fbf0c4d4bb2f2d42fd692b6e44df4/sys/Ds4Pdo.cpp#L153-L164
+  /**
+   * @brief DS4 report init ex.
+   */
   constexpr DS4_REPORT_EX ds4_report_init_ex = {
     {{.bThumbLX = 0x80,
       .bThumbLY = 0x80,
@@ -144,7 +209,9 @@ namespace platf {
     auto &report = gamepad.report.ds4.Report;
 
     // Use int32 to process this data, so we can clamp if needed.
-    int32_t intX, intY, intZ;
+    int32_t intX;
+    int32_t intY;
+    int32_t intZ;
 
     switch (motion_type) {
       case LI_MOTION_TYPE_ACCEL:
@@ -195,8 +262,16 @@ namespace platf {
     }
   }
 
+  /**
+   * @brief ViGEm client connection and virtual gamepad collection.
+   */
   class vigem_t {
   public:
+    /**
+     * @brief Connect to ViGEm and prepare virtual gamepad slots.
+     *
+     * @return 0 on success; nonzero or negative platform status on failure.
+     */
     int init() {
       // Probe ViGEm during startup to see if we can successfully attach gamepads. This will allow us to
       // immediately display the error message in the web UI even before the user tries to stream.
@@ -384,7 +459,7 @@ namespace platf {
     }
 
     /**
-     * @brief vigem_t destructor.
+     * @brief Detach all virtual gamepads and disconnect from the ViGEm client.
      */
     ~vigem_t() {
       if (client) {
@@ -401,9 +476,9 @@ namespace platf {
       }
     }
 
-    std::vector<gamepad_context_t> gamepads;
+    std::vector<gamepad_context_t> gamepads;  ///< Virtual gamepads owned by this ViGEm connection.
 
-    client_t client;
+    client_t client;  ///< ViGEm client connection used to create virtual gamepads.
   };
 
   void CALLBACK x360_notify(
@@ -440,16 +515,19 @@ namespace platf {
     task_pool.push(&vigem_t::set_rgb_led, (vigem_t *) userdata, target, led_color.Red, led_color.Green, led_color.Blue);
   }
 
+  /**
+   * @brief Global inputtino device handles shared by clients.
+   */
   struct input_raw_t {
     ~input_raw_t() {
       delete vigem;
     }
 
-    vigem_t *vigem;
+    vigem_t *vigem;  ///< Vigem.
 
-    decltype(CreateSyntheticPointerDevice) *fnCreateSyntheticPointerDevice;
-    decltype(InjectSyntheticPointerInput) *fnInjectSyntheticPointerInput;
-    decltype(DestroySyntheticPointerDevice) *fnDestroySyntheticPointerDevice;
+    decltype(CreateSyntheticPointerDevice) *fnCreateSyntheticPointerDevice;  ///< Fn create synthetic pointer device.
+    decltype(InjectSyntheticPointerInput) *fnInjectSyntheticPointerInput;  ///< Fn inject synthetic pointer input.
+    decltype(DestroySyntheticPointerDevice) *fnDestroySyntheticPointerDevice;  ///< Fn destroy synthetic pointer device.
   };
 
   input_t input() {
@@ -522,8 +600,10 @@ namespace platf {
       // MOUSEEVENTF_VIRTUALDESK maps to the entirety of the desktop rather than the primary desktop
       MOUSEEVENTF_VIRTUALDESK;
 
-    auto scaled_x = std::lround((x + touch_port.offset_x) * ((float) target_touch_port.width / (float) touch_port.width));
-    auto scaled_y = std::lround((y + touch_port.offset_y) * ((float) target_touch_port.height / (float) touch_port.height));
+    // Note: x and y already include the display offset (offset_x/offset_y) from client_to_touchport(),
+    // so we must not add offset_x/offset_y again here to avoid double-offsetting on multi-monitor setups.
+    auto scaled_x = std::lround(x * ((float) target_touch_port.width / (float) touch_port.width));
+    auto scaled_y = std::lround(y * ((float) target_touch_port.height / (float) touch_port.height));
 
     mi.dx = scaled_x;
     mi.dy = scaled_y;
@@ -660,7 +740,15 @@ namespace platf {
     send_input(i);
   }
 
+  /**
+   * @brief Per-client inputtino devices for touch and pen input.
+   */
   struct client_input_raw_t: public client_input_t {
+    /**
+     * @brief Create per-client raw input devices for touch and pen events.
+     *
+     * @param input Platform input backend that receives the event.
+     */
     client_input_raw_t(input_t &input) {
       global = (input_raw_t *) input.get();
     }
@@ -688,14 +776,14 @@ namespace platf {
     // pen/touch events. To maintain separation, we expose separate pen and touch devices
     // for each client.
 
-    HSYNTHETICPOINTERDEVICE pen {};
-    POINTER_TYPE_INFO penInfo {};
-    thread_pool_util::ThreadPool::task_id_t penRepeatTask {};
+    HSYNTHETICPOINTERDEVICE pen {};  ///< Windows synthetic pointer device used for pen events.
+    POINTER_TYPE_INFO penInfo {};  ///< Pen info.
+    thread_pool_util::ThreadPool::task_id_t penRepeatTask {};  ///< Pen repeat task.
 
-    HSYNTHETICPOINTERDEVICE touch {};
-    POINTER_TYPE_INFO touchInfo[10] {};
-    UINT32 activeTouchSlots {};
-    thread_pool_util::ThreadPool::task_id_t touchRepeatTask {};
+    HSYNTHETICPOINTERDEVICE touch {};  ///< Windows synthetic pointer device used for touch events.
+    POINTER_TYPE_INFO touchInfo[10] {};  ///< Touch info.
+    UINT32 activeTouchSlots {};  ///< Active touch slots.
+    thread_pool_util::ThreadPool::task_id_t touchRepeatTask {};  ///< Touch repeat task.
   };
 
   /**
@@ -837,7 +925,7 @@ namespace platf {
   // Active pointer interactions sent via InjectSyntheticPointerInput() seem to be automatically
   // cancelled by Windows if not repeated/updated within about a second. To avoid this, refresh
   // the injected input periodically.
-  constexpr auto ISPI_REPEAT_INTERVAL = 50ms;
+  constexpr auto ISPI_REPEAT_INTERVAL = 50ms;  ///< Protocol or platform constant for ispi repeat interval.
 
   /**
    * @brief Repeats the current touch state to avoid the interactions timing out.
@@ -897,7 +985,7 @@ namespace platf {
   }
 
   // These are edge-triggered pointer state flags that should always be cleared next frame
-  constexpr auto EDGE_TRIGGERED_POINTER_FLAGS = POINTER_FLAG_DOWN | POINTER_FLAG_UP | POINTER_FLAG_CANCELED | POINTER_FLAG_UPDATE;
+  constexpr auto EDGE_TRIGGERED_POINTER_FLAGS = POINTER_FLAG_DOWN | POINTER_FLAG_UP | POINTER_FLAG_CANCELED | POINTER_FLAG_UPDATE;  ///< Protocol or platform constant for edge triggered pointer flags.
 
   /**
    * @brief Sends a touch event to the OS.
@@ -1146,9 +1234,9 @@ namespace platf {
 
   void unicode(input_t &input, char *utf8, int size) {
     // We can do no worse than one UTF-16 character per byte of UTF-8
-    WCHAR wide[size];
+    std::vector<WCHAR> wide(size);
 
-    int chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, size, wide, size);
+    int chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, size, wide.data(), size);
     if (chars <= 0) {
       return;
     }
@@ -1295,7 +1383,7 @@ namespace platf {
   }
 
   /**
-   * @brief Updates the X360 input report with the provided gamepad state.
+   * @brief Update an X360 report from Sunshine gamepad state.
    * @param gamepad The gamepad to update.
    * @param gamepad_state The gamepad button/axis state sent from the client.
    */
@@ -1425,7 +1513,7 @@ namespace platf {
   }
 
   /**
-   * @brief Updates the DS4 input report with the provided gamepad state.
+   * @brief Update a DS4 report from Sunshine gamepad state.
    * @param gamepad The gamepad to update.
    * @param gamepad_state The gamepad button/axis state sent from the client.
    */
@@ -1481,7 +1569,7 @@ namespace platf {
   }
 
   /**
-   * @brief Updates virtual gamepad with the provided gamepad state.
+   * @brief Submit updated Sunshine gamepad state to the virtual device.
    * @param input The input context.
    * @param nr The gamepad index to update.
    * @param gamepad_state The gamepad button/axis state sent from the client.

@@ -42,13 +42,21 @@ First-party steps, verified on **Arch / CachyOS**. (For Debian/Fedora/Ubuntu the
 
 ```bash
 # Build tooling — upstream pins gcc-14 (a newer gcc, e.g. 16, currently breaks the build)
-sudo pacman -S --needed gcc14 cmake make nodejs npm git appstream appstream-glib desktop-file-utils
+sudo pacman -S --needed gcc14 cmake make nodejs npm git appstream appstream-glib \
+  desktop-file-utils python-jinja shaderc
 
 # Runtime / library deps
-sudo pacman -S --needed avahi curl libayatana-appindicator libcap libdrm libevdev \
+sudo pacman -S --needed avahi curl libcap libdrm libevdev \
   libmfx libnotify libpulse libva libx11 libxcb libxfixes libxrandr libxtst \
-  miniupnpc numactl openssl opus
+  miniupnpc numactl openssl opus pipewire qt6-base qt6-svg vulkan-icd-loader wayland
 ```
+
+> [!NOTE]
+> A few of these are new since the Sunshine sync: `qt6-base`/`qt6-svg` (the tray icon moved to a Qt
+> backend and no longer uses `libayatana-appindicator`), `pipewire` (required by the KWin ScreenCast
+> and XDG Desktop Portal capture backends, both on by default), `shaderc` + `vulkan-icd-loader`
+> (Vulkan video encoding, on by default — pass `-DSUNSHINE_ENABLE_VULKAN=OFF` to skip) and
+> `python-jinja` (generates the glad GL/EGL loader).
 
 ### Build
 
@@ -68,7 +76,19 @@ make -C build -j"$(nproc)"
 The binary lands at `build/sunshine`. Run it directly to test, or install with `make -C build install`.
 
 > [!TIP]
-> On NVIDIA, install `cuda` and drop the `-DSUNSHINE_ENABLE_CUDA=OFF` flag to enable NVENC. On AMD, `libva-mesa-driver` enables VAAPI encoding.
+> `SUNSHINE_ENABLE_CUDA` does **not** gate NVENC — NVENC goes through FFmpeg (`h264_nvenc`,
+> `hevc_nvenc`, `av1_nvenc`) and works with the flag off, just without zero-copy (you'll see a benign
+> `Attempting to use NVENC without CUDA support` warning). What the flag does gate is the CUDA/OpenGL
+> interop path, and with it **NvFBC capture and 4:4:4 chroma on NVENC**. If you want either, install
+> `cuda` and drop `-DSUNSHINE_ENABLE_CUDA=OFF`. On AMD, `libva-mesa-driver` enables VAAPI encoding
+> (which has its own HEVC 4:4:4 profiles).
+
+### Capture backends on Linux
+
+Beyond KMS/DRM, wlroots Wayland and X11, the host now also supports **KWin ScreenCast** (a direct
+Wayland protocol that bypasses the portal — the KDE/Plasma path) and the **XDG Desktop Portal**. Both
+are built by default and both need PipeWire; turn them off with `-DSUNSHINE_ENABLE_KWIN=OFF` /
+`-DSUNSHINE_ENABLE_PORTAL=OFF`. Encoding can go through VAAPI, NVENC or **Vulkan Video**.
 
 ## Documentation
 
@@ -112,13 +132,14 @@ If HDR looks dark/washed-out, that's usually the client tone-mapping SDR content
 
 | Component | Minimum |
 |-----------|---------|
-| GPU | AMD: VCE 1.0+ · Intel: VAAPI-compatible · Nvidia: NVENC-capable |
+| GPU | AMD: VCE 1.0+ · Intel: VAAPI-compatible (Linux) / Skylake+ with QuickSync (Windows) · Nvidia: NVENC-capable |
 | CPU | AMD Ryzen 3 / Intel Core i3 or higher |
 | RAM | 4 GB+ |
-| OS | Windows 10+ · macOS 12+ · Linux: Debian 11+, Fedora 39+, Ubuntu 22.04+ |
+| OS | Linux: Debian 13+ (trixie), Fedora 43+, Ubuntu 22.04+ · Windows 11+ · macOS 14.2+ · FreeBSD 14.4+ |
 | Network | 5 GHz 802.11ac (host & client) |
 
-For 4K/HDR, prefer wired CAT5e+ and a newer GPU (AMD VCE 3.4+, Intel UHD 730+, Nvidia Pascal/GTX 10-series+).
+For 4K, prefer wired CAT5e+ and a newer GPU (AMD VCE 3.1+, Intel HD 510+, Nvidia RTX 2000-series+ on
+Linux / GTX 1080+ on Windows). For HDR: AMD VCE 3.4+, Intel UHD 730+, Nvidia Pascal/GTX 10-series+.
 
 ## Integrations
 

@@ -4,7 +4,7 @@ Read our contribution guide in our organization level
 
 ## Recommended Tools
 
-| Tool                                                                                                                                                                           | Description                                                                                                                                                                           |
+| Tool                                                                                                                                                                           | Description                                                             |
 |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
 | <a href="https://www.jetbrains.com/clion/"><img src="https://resources.jetbrains.com/storage/products/company/brand/logos/CLion_icon.svg" width="30" height="30"></a><br>CLion | Recommended IDE for C and C++ development. Free for non-commercial use. |
 
@@ -16,6 +16,7 @@ Read our contribution guide in our organization level
 * [EJS](https://www.npmjs.com/package/vite-plugin-ejs) is used as a templating system for the pages
   (check `template_header.html` and `template_header_main.html`).
 * The Style System is provided by [Bootstrap](https://getbootstrap.com).
+* Icons are provided by [Lucide](https://lucide.dev) and [Simple Icons](https://simpleicons.org).
 * The JS framework used by the more interactive pages is [Vue.js](https://vuejs.org).
 
 #### Building
@@ -38,7 +39,7 @@ The default language is `en` (English).
 
 @admonition{Community | We are looking for language coordinators to help approve translations.
 The goal is to have the bars above filled with green!
-If you are interesting, please reach out to us on our Discord server.}
+If you are interested, please reach out to us on our Discord server.}
 
 #### CrowdIn
 The translations occur on [CrowdIn][crowdin-url].
@@ -126,18 +127,24 @@ any of the following paths are modified.
 - 'src/**'
 ```
 
-When testing locally it may be desirable to manually extract, initialize, update, and compile strings. Python is
-required for this, along with the python dependencies in the `./scripts/requirements.txt` file. Additionally,
-[xgettext](https://www.gnu.org/software/gettext) must be installed.
+When testing locally, it may be desirable to manually extract, initialize, update, and compile strings. Python and
+uv are required for this, along with the Python dependencies in the Sunshine `pyproject.toml`. From the repository
+root, install these with the following command.
+
+```bash
+uv sync --locked
+```
+
+Additionally, [xgettext](https://www.gnu.org/software/gettext) must be installed.
 
 * Extract, initialize, and update
   ```bash
-  python ./scripts/_locale.py --extract --init --update
+  uv run --locked --no-sync lb-localize --root-dir . --extract --init --update
   ```
 
 * Compile
   ```bash
-  python ./scripts/_locale.py --compile
+  uv run --locked --no-sync lb-localize --root-dir . --compile
   ```
 
 > [!IMPORTANT]
@@ -149,17 +156,14 @@ required for this, along with the python dependencies in the `./scripts/requirem
 ### Testing
 
 #### Clang Format
-Source code is tested against the `.clang-format` file for linting errors. The workflow file responsible for clang
-format testing is `.github/workflows/cpp-clang-format-lint.yml`.
+Source code is tested against the `.clang-format` file for linting errors.
 
-Option 1:
-```bash
-find ./ -iname *.cpp -o -iname *.h -iname *.m -iname *.mm | xargs clang-format -i
-```
+From the repository root, apply clang-format locally with the installed lizardbyte-common script. This will modify
+files in place.
 
-Option 2 (will modify files):
 ```bash
-python ./scripts/update_clang_format.py
+uv sync --locked
+uv run --locked --no-sync lb-update-clang-format
 ```
 
 #### Unit Testing

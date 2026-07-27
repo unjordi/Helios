@@ -4,13 +4,11 @@
  */
 #pragma once
 #ifdef _WIN32
-  // lib includes
-  #include <ffnvcodec/dynlink_cuda.h>
-
   // local includes
   #include "nvenc_d3d11.h"
+  #include "nvenc_sdk.h"
 
-namespace nvenc {
+namespace NVENC_NAMESPACE {
 
   /**
    * @brief Interop Direct3D11 on CUDA NVENC encoder.
@@ -21,9 +19,10 @@ namespace nvenc {
     /**
      * @param d3d_device Direct3D11 device that will create input surface texture.
      *                   CUDA encoding device will be derived from it.
+     * @param dll Shared NVENC driver module.
      */
-    explicit nvenc_d3d11_on_cuda(ID3D11Device *d3d_device);
-    ~nvenc_d3d11_on_cuda();
+    explicit nvenc_d3d11_on_cuda(ID3D11Device *d3d_device, ::nvenc::shared_dll dll);
+    ~nvenc_d3d11_on_cuda() override;
 
     ID3D11Texture2D *get_input_texture() override;
 
@@ -56,7 +55,6 @@ namespace nvenc {
 
     autopop_context push_context();
 
-    HMODULE dll = nullptr;
     const ID3D11DevicePtr d3d_device;
     ID3D11Texture2DPtr d3d_input_texture;
 
@@ -85,5 +83,5 @@ namespace nvenc {
     size_t cuda_surface_pitch = 0;
   };
 
-}  // namespace nvenc
+}  // namespace NVENC_NAMESPACE
 #endif

@@ -8,24 +8,77 @@ It is recommended to use one of the following compilers:
 
 | Compiler    | Version |
 |:------------|:--------|
-| GCC         | 13+     |
+| GCC         | 14+     |
 | Clang       | 17+     |
 | Apple Clang | 15+     |
 
 ### Dependencies
 
+#### FreeBSD
+> [!CAUTION]
+> Sunshine support for FreeBSD is experimental and may be incomplete or not work as expected
+
+##### Install dependencies
+```sh
+pkg install -y \
+  audio/opus \
+  audio/pulseaudio \
+  devel/cmake \
+  devel/evdev-proto \
+  devel/git \
+  devel/libevdev \
+  devel/libnotify \
+  devel/llvm19 \
+  devel/ninja \
+  devel/pkgconf \
+  devel/qt6-base \
+  ftp/curl \
+  graphics/libdrm \
+  graphics/qt6-svg \
+  graphics/wayland \
+  multimedia/libva \
+  net/miniupnpc \
+  ports-mgmt/pkg \
+  security/openssl \
+  shells/bash \
+  www/npm-node22 \
+  x11/libX11 \
+  x11/libxcb \
+  x11/libXfixes \
+  x11/libXrandr \
+  x11/libXtst
+```
+
+Use LLVM 19 when configuring a local FreeBSD build:
+
+```sh
+export CC=clang19
+export CXX=clang++19
+```
+
 #### Linux
 Dependencies vary depending on the distribution. You can reference our
 [linux_build.sh](https://github.com/LizardByte/Sunshine/blob/master/scripts/linux_build.sh) script for a list of
-dependencies we use in Debian-based and Fedora-based distributions. Please submit a PR if you would like to extend the
+dependencies we use in Debian-based, Fedora-based and Arch-based distributions. Please submit a PR if you would like to extend the
 script to support other distributions.
+
+##### KMS Capture
+If you are using KMS, patching the Sunshine binary with `setcap` is required. Some post-install scripts handle this. If building
+from source and using the binary directly, this will also work:
+
+```bash
+sudo cp build/sunshine /tmp
+sudo setcap cap_sys_admin,cap_sys_nice+p /tmp/sunshine
+sudo getcap /tmp/sunshine
+sudo mv /tmp/sunshine build/sunshine
+```
 
 ##### CUDA Toolkit
 Sunshine requires CUDA Toolkit for NVFBC capture. There are two caveats to CUDA:
 
 1. The version installed depends on the version of GCC.
 2. The version of CUDA you use will determine compatibility with various GPU generations.
-   At the time of writing, the recommended version to use is CUDA ~12.9.
+   At the time of writing, the recommended version to use is CUDA ~13.1.
    See [CUDA compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/index.html) for more info.
 
 > [!NOTE]
@@ -82,43 +135,70 @@ sudo port install "${dependencies[@]}"
 ```
 
 #### Windows
-First you need to install [MSYS2](https://www.msys2.org), then startup "MSYS2 UCRT64" and execute the following
-commands.
+
+> [!WARNING]
+> Cross-compilation is not supported on Windows. You must build on the target architecture.
+
+First, you need to install [MSYS2](https://www.msys2.org).
+
+For AMD64 startup "MSYS2 UCRT64" (or for ARM64 startup "MSYS2 CLANGARM64") then execute the following commands.
 
 ##### Update all packages
 ```bash
 pacman -Syu
 ```
 
+##### Set toolchain variable
+For UCRT64:
+```bash
+export TOOLCHAIN="ucrt-x86_64"
+```
+
+For CLANGARM64:
+```bash
+export TOOLCHAIN="clang-aarch64"
+```
+
 ##### Install dependencies
 ```bash
 dependencies=(
   "git"
-  "mingw-w64-ucrt-x86_64-boost"  # Optional
-  "mingw-w64-ucrt-x86_64-cmake"
-  "mingw-w64-ucrt-x86_64-cppwinrt"
-  "mingw-w64-ucrt-x86_64-curl-winssl"
-  "mingw-w64-ucrt-x86_64-doxygen"  # Optional, for docs... better to install official Doxygen
-  "mingw-w64-ucrt-x86_64-graphviz"  # Optional, for docs
-  "mingw-w64-ucrt-x86_64-MinHook"
-  "mingw-w64-ucrt-x86_64-miniupnpc"
-  "mingw-w64-ucrt-x86_64-nsis"
-  "mingw-w64-ucrt-x86_64-onevpl"
-  "mingw-w64-ucrt-x86_64-openssl"
-  "mingw-w64-ucrt-x86_64-opus"
-  "mingw-w64-ucrt-x86_64-toolchain"
-  "mingw-w64-ucrt-x86_64-nlohmann_json"
+  "mingw-w64-${TOOLCHAIN}-boost"  # Optional
+  "mingw-w64-${TOOLCHAIN}-cmake"
+  "mingw-w64-${TOOLCHAIN}-cppwinrt"
+  "mingw-w64-${TOOLCHAIN}-curl-winssl"
+  "mingw-w64-${TOOLCHAIN}-doxygen"  # Optional, for docs... better to install official Doxygen
+  "mingw-w64-${TOOLCHAIN}-graphviz"  # Optional, for docs
+  "mingw-w64-${TOOLCHAIN}-miniupnpc"
+  "mingw-w64-${TOOLCHAIN}-onevpl"
+  "mingw-w64-${TOOLCHAIN}-openssl"
+  "mingw-w64-${TOOLCHAIN}-opus"
+  "mingw-w64-${TOOLCHAIN}-toolchain"
 )
+if [[ "${MSYSTEM}" == "UCRT64" ]]; then
+  dependencies+=(
+    "mingw-w64-${TOOLCHAIN}-MinHook"
+    "mingw-w64-${TOOLCHAIN}-nodejs"
+    "mingw-w64-${TOOLCHAIN}-nsis"
+  )
+fi
 pacman -S "${dependencies[@]}"
 ```
 
+To create a WiX installer, you also need to install [.NET](https://dotnet.microsoft.com/download).
+
 ##### Install Node.js
-Install Node.js separately from [nodejs.org](https://nodejs.org/) (LTS or current) or via
-[nvm-windows](https://github.com/coreybutler/nvm-windows). Don't install MSYS2's
-`mingw-w64-ucrt-x86_64-nodejs` — it's compiled with the MSYS2 gcc-16 libstdc++ which has
-a `std::bad_weak_ptr` regression that crashes Node during process init (see
-[apache/arrow#49958](https://github.com/apache/arrow/issues/49958) for the upstream
-toolchain trail). The official MSVC-built Node.js isn't affected.
+For ARM64 (CLANGARM64) the frontend toolchain is not packaged by MSYS2, so Node.js must be installed
+separately from [nodejs.org](https://nodejs.org/en/download).
+
+> [!WARNING]
+> Helios note: on UCRT64 you may also want to install Node.js from
+> [nodejs.org](https://nodejs.org/) (LTS or current) or via
+> [nvm-windows](https://github.com/coreybutler/nvm-windows) instead of MSYS2's
+> `mingw-w64-${TOOLCHAIN}-nodejs` — the MSYS2 build is compiled with the MSYS2 gcc-16 libstdc++,
+> which has a `std::bad_weak_ptr` regression that crashes Node during process init (see
+> [apache/arrow#49958](https://github.com/apache/arrow/issues/49958) for the upstream toolchain
+> trail). The official MSVC-built Node.js isn't affected.
 
 Make sure `node.exe` is on `PATH` before running `cmake` — the `web-ui` CMake target
 invokes `npm install` via `find_program(NPM npm)`, so the official Node's `npm` must be
@@ -147,6 +227,11 @@ ninja -C build
 ### Package
 
 @tabs{
+  @tab{FreeBSD | @tabs{
+    @tab{pkg | ```bash
+      cpack -G FREEBSD --config ./build/CPackConfig.cmake
+      ```}
+  }}
   @tab{Linux | @tabs{
     @tab{deb | ```bash
       cpack -G DEB --config ./build/CPackConfig.cmake
@@ -161,8 +246,11 @@ ninja -C build
       ```}
   }}
   @tab{Windows | @tabs{
-    @tab{Installer | ```bash
+    @tab{NSIS Installer | ```bash
       cpack -G NSIS --config ./build/CPackConfig.cmake
+      ```}
+    @tab{WiX Installer | ```bash
+      cpack -G WIX --config ./build/CPackConfig.cmake
       ```}
     @tab{Portable | ```bash
       cpack -G ZIP --config ./build/CPackConfig.cmake

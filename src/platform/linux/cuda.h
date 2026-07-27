@@ -69,8 +69,10 @@ namespace cuda {
   stream_t make_stream(int flags = 0);
 
   struct viewport_t {
-    int width, height;
-    int offsetX, offsetY;
+    int width;
+    int height;
+    int offsetX;
+    int offsetY;
   };
 
   class tex_t {
@@ -108,8 +110,10 @@ namespace cuda {
     static std::optional<sws_t> make(int in_width, int in_height, int out_width, int out_height, int pitch);
 
     // Converts loaded image into a CUDevicePtr
-    int convert(std::uint8_t *Y, std::uint8_t *UV, std::uint32_t pitchY, std::uint32_t pitchUV, cudaTextureObject_t texture, stream_t::pointer stream);
-    int convert(std::uint8_t *Y, std::uint8_t *UV, std::uint32_t pitchY, std::uint32_t pitchUV, cudaTextureObject_t texture, stream_t::pointer stream, const viewport_t &viewport);
+    int convert_nv12(std::uint8_t *Y, std::uint8_t *UV, std::uint32_t pitchY, std::uint32_t pitchUV, cudaTextureObject_t texture, stream_t::pointer stream);
+    int convert_nv12(std::uint8_t *Y, std::uint8_t *UV, std::uint32_t pitchY, std::uint32_t pitchUV, cudaTextureObject_t texture, stream_t::pointer stream, const viewport_t &viewport);
+    int convert_yuv444(std::uint8_t *Y, std::uint8_t *U, std::uint8_t *V, std::uint32_t pitch, cudaTextureObject_t texture, stream_t::pointer stream);
+    int convert_yuv444(std::uint8_t *Y, std::uint8_t *U, std::uint8_t *V, std::uint32_t pitch, cudaTextureObject_t texture, stream_t::pointer stream, const viewport_t &viewport);
 
     void apply_colorspace(const video::sunshine_colorspace_t &colorspace);
 

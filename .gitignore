@@ -44,7 +44,6 @@ docs/doxyconfig*
 
 # npm
 node_modules/
-package-lock.json
 
 # Translations
 *.mo
@@ -54,5 +53,7 @@ package-lock.json
 .DS_Store
 
 # Python
+*.egg-info/
 *.pyc
+.venv/
 venv/

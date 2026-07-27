@@ -1,7 +1,11 @@
 # common target definitions
 # this file will also load platform specific macros
 
-add_executable(sunshine ${SUNSHINE_TARGET_FILES})
+if(APPLE AND NOT SUNSHINE_BUILD_HOMEBREW)
+    add_executable(sunshine MACOSX_BUNDLE ${SUNSHINE_TARGET_FILES})
+else()
+    add_executable(sunshine ${SUNSHINE_TARGET_FILES})
+endif()
 foreach(dep ${SUNSHINE_TARGET_DEPENDENCIES})
     add_dependencies(sunshine ${dep})  # compile these before sunshine
 endforeach()
@@ -19,17 +23,8 @@ elseif(UNIX)
     endif()
 endif()
 
-# todo - is this necessary? ... for anything except linux?
-if(NOT DEFINED CMAKE_CUDA_STANDARD)
-    set(CMAKE_CUDA_STANDARD 17)
-    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-endif()
-
 target_link_libraries(sunshine ${SUNSHINE_EXTERNAL_LIBRARIES} ${EXTRA_LIBS})
 target_compile_definitions(sunshine PUBLIC ${SUNSHINE_DEFINITIONS})
-set_target_properties(sunshine PROPERTIES CXX_STANDARD 23
-        VERSION ${PROJECT_VERSION}
-        SOVERSION ${PROJECT_VERSION_MAJOR})
 
 # CLion complains about unknown flags after running cmake, and cannot add symbols to the index for cuda files
 if(CUDA_INHERIT_COMPILE_OPTIONS)
@@ -39,6 +34,7 @@ if(CUDA_INHERIT_COMPILE_OPTIONS)
 endif()
 
 target_compile_options(sunshine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${SUNSHINE_COMPILE_OPTIONS}>;$<$<COMPILE_LANGUAGE:CUDA>:${SUNSHINE_COMPILE_OPTIONS_CUDA};-std=c++17>)  # cmake-lint: disable=C0301
+target_link_options(sunshine PRIVATE ${SUNSHINE_LINK_OPTIONS})
 
 # Homebrew build fails the vite build if we set these environment variables
 if(${SUNSHINE_BUILD_HOMEBREW})
@@ -54,16 +50,15 @@ endif()
 #WebUI build
 find_program(NPM npm REQUIRED)
 
+set(NPM_INSTALL_FLAGS "--ignore-scripts")
 if (NPM_OFFLINE)
-    set(NPM_INSTALL_FLAGS "--offline")
-else()
-    set(NPM_INSTALL_FLAGS "")
+    set(NPM_INSTALL_FLAGS "${NPM_INSTALL_FLAGS} --offline")
 endif()
 
 add_custom_target(web-ui ALL
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Installing NPM Dependencies and Building the Web UI"
-        COMMAND "$<$<BOOL:${WIN32}>:cmd;/C>" "${NPM}" install ${NPM_INSTALL_FLAGS}
+        COMMAND "$<$<BOOL:${WIN32}>:cmd;/C>" "${NPM}" ci ${NPM_INSTALL_FLAGS}
         COMMAND "${CMAKE_COMMAND}" -E env "SUNSHINE_BUILD_HOMEBREW=${NPM_BUILD_HOMEBREW}" "SUNSHINE_SOURCE_ASSETS_DIR=${NPM_SOURCE_ASSETS_DIR}" "SUNSHINE_ASSETS_DIR=${NPM_ASSETS_DIR}" "$<$<BOOL:${WIN32}>:cmd;/C>" "${NPM}" run build  # cmake-lint: disable=C0301
         COMMAND_EXPAND_LISTS
         VERBATIM)
@@ -90,11 +85,6 @@ endif()
 set_source_files_properties("${CMAKE_SOURCE_DIR}/src/upnp.cpp"
         DIRECTORY "${CMAKE_SOURCE_DIR}" "${TEST_DIR}"
         PROPERTIES COMPILE_FLAGS -Wno-pedantic)
-
-# third-party/nanors
-set_source_files_properties("${CMAKE_SOURCE_DIR}/src/rswrapper.c"
-        DIRECTORY "${CMAKE_SOURCE_DIR}" "${TEST_DIR}"
-        PROPERTIES COMPILE_FLAGS "-ftree-vectorize -funroll-loops")
 
 # third-party/ViGEmClient
 set(VIGEM_COMPILE_FLAGS "")

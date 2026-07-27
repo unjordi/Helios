@@ -96,11 +96,18 @@ const config = ref(props.config)
       <select id="capture" class="form-select" v-model="config.capture">
         <option value="">{{ $t('_common.autodetect') }}</option>
         <PlatformLayout :platform="platform">
+          <template #freebsd>
+            <option value="wlr">wlroots</option>
+            <option value="x11">X11</option>
+            <option value="portal">XDG Portal</option>
+          </template>
           <template #linux>
             <option value="nvfbc">NvFBC</option>
             <option value="wlr">wlroots</option>
             <option value="kms">KMS</option>
             <option value="x11">X11</option>
+            <option value="kwin">KWin Screencast</option>
+            <option value="portal">XDG Portal</option>
           </template>
           <template #windows>
             <option value="ddx">Desktop Duplication API</option>
@@ -122,9 +129,14 @@ const config = ref(props.config)
             <option value="quicksync">Intel QuickSync</option>
             <option value="amdvce">AMD AMF/VCE</option>
           </template>
+          <template #freebsd>
+            <option value="vulkan">Vulkan</option>
+            <option value="vaapi">VA-API</option>
+          </template>
           <template #linux>
             <option value="nvenc">NVIDIA NVENC</option>
             <option value="vaapi">VA-API</option>
+            <option value="vulkan">Vulkan</option>
           </template>
           <template #macos>
             <option value="videotoolbox">VideoToolbox</option>

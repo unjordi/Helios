@@ -9,12 +9,18 @@ const props = defineProps([
 ])
 
 const config = ref(props.config)
-const outputNamePlaceholder = (props.platform === 'windows') ? '{de9bb7e2-186e-505b-9e93-f48793333810}' : '0'
+let _outputNamePlaceholder = '0';
+if(props.platform === 'windows') {
+  _outputNamePlaceholder = '{de9bb7e2-186e-505b-9e93-f48793333810}';
+} else if(props.platform === 'linux' || props.platform === 'freebsd') {
+  _outputNamePlaceholder = 'DP-0';
+}
+const outputNamePlaceholder = _outputNamePlaceholder;  // NOSONAR(javascript:S1481,javascript:S1854): Constant used by vue.js binding for placeholder below
 </script>
 
 <template>
   <div class="mb-3">
-    <label for="output_name" class="form-label">{{ $tp('config.output_name') }}</label>
+    <label for="output_name" class="form-label">{{ $t('config.output_name') }}</label>
     <input type="text" class="form-control" id="output_name" :placeholder="outputNamePlaceholder"
            v-model="config.output_name"/>
     <div class="form-text">
@@ -30,14 +36,22 @@ const outputNamePlaceholder = (props.platform === 'windows') ? '{de9bb7e2-186e-5
             <b>&nbsp;&nbsp;}</b>
           </pre>
         </template>
+        <template #freebsd>
+          <pre style="white-space: pre-line;">
+            Info: Detecting displays
+            Info: Detected display: HDMI-A-1 connected: true
+            Info: Detected display: DP-1 connected: true
+            Info: Detected display: DP-2 connected: false
+            Info: Detected display: DVI-D-3 connected: false
+          </pre>
+        </template>
         <template #linux>
           <pre style="white-space: pre-line;">
             Info: Detecting displays
-            Info: Detected display: DVI-D-0 (id: 0) connected: false
-            Info: Detected display: HDMI-0 (id: 1) connected: true
-            Info: Detected display: DP-0 (id: 2) connected: true
-            Info: Detected display: DP-1 (id: 3) connected: false
-            Info: Detected display: DVI-D-1 (id: 4) connected: false
+            Info: Detected display: HDMI-A-1 connected: true
+            Info: Detected display: DP-1 connected: true
+            Info: Detected display: DP-2 connected: false
+            Info: Detected display: DVI-D-3 connected: false
           </pre>
         </template>
         <template #macos>
