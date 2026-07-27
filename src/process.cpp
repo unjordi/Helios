@@ -1461,7 +1461,10 @@ namespace proc {
           ctx.use_app_identity = app_node.value("use-app-identity", false);
           ctx.per_client_app_identity = app_node.value("per-client-app-identity", false);
           ctx.allow_client_commands = app_node.value("allow-client-commands", true);
-          ctx.terminate_on_pause = app_node.value("terminate-on-pause", false);
+          // Default true: on an unclean disconnect proc_t::pause() would otherwise leave the app
+          // parked forever and never run the undo prep-cmds, stranding whatever the do-cmds changed
+          // (display mode, session lock). Set "terminate-on-pause": false per app to opt out.
+          ctx.terminate_on_pause = app_node.value("terminate-on-pause", true);
           ctx.gamepad = app_node.value("gamepad", "");
 
           // Calculate a unique application id.
@@ -1528,7 +1531,7 @@ namespace proc {
       ctx.use_app_identity = false;
       ctx.per_client_app_identity = false;
       ctx.allow_client_commands = false;
-      ctx.terminate_on_pause = false;
+      ctx.terminate_on_pause = true;
 
       ctx.elevated = false;
       ctx.auto_detach = true;
@@ -1562,7 +1565,7 @@ namespace proc {
       ctx.use_app_identity = false;
       ctx.per_client_app_identity = false;
       ctx.allow_client_commands = false;
-      ctx.terminate_on_pause = false;
+      ctx.terminate_on_pause = true;
 
       ctx.elevated = false;
       ctx.auto_detach = true;
