@@ -6,25 +6,50 @@
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
 
   #if defined(_WIN32)
+    /**
+     * @def WIN32_LEAN_AND_MEAN
+     * @brief Macro for WIN32 LEAN AND MEAN.
+     */
     #define WIN32_LEAN_AND_MEAN
     #include <accctrl.h>
     #include <aclapi.h>
     #include "platform/windows/utils.h"
+    /**
+     * @def TRAY_ICON
+     * @brief Macro for TRAY ICON.
+     */
     #define TRAY_ICON WEB_DIR "images/apollo.ico"
+    /**
+     * @def TRAY_ICON_PLAYING
+     * @brief Macro for TRAY ICON PLAYING.
+     */
     #define TRAY_ICON_PLAYING WEB_DIR "images/apollo-playing.ico"
+    /**
+     * @def TRAY_ICON_PAUSING
+     * @brief Macro for TRAY ICON PAUSING.
+     */
     #define TRAY_ICON_PAUSING WEB_DIR "images/apollo-pausing.ico"
+    /**
+     * @def TRAY_ICON_LOCKED
+     * @brief Macro for TRAY ICON LOCKED.
+     */
     #define TRAY_ICON_LOCKED WEB_DIR "images/apollo-locked.ico"
-  #elif defined(__linux__) || defined(linux) || defined(__linux)
-    #define TRAY_ICON SUNSHINE_TRAY_PREFIX "-tray"
-    #define TRAY_ICON_PLAYING SUNSHINE_TRAY_PREFIX "-playing"
-    #define TRAY_ICON_PAUSING SUNSHINE_TRAY_PREFIX "-pausing"
-    #define TRAY_ICON_LOCKED SUNSHINE_TRAY_PREFIX "-locked"
+  #elif defined(__linux__) || defined(linux) || defined(__linux) || defined(__FreeBSD__)
+    // Sunshine movió el tray al target Qt `third-party/tray` y eliminó SUNSHINE_TRAY_PREFIX
+    // (los íconos ya no se registran en el tema hicolor: Qt6 los rechaza). Ahora se referencian
+    // por ruta dentro del web dir, igual que en Windows/macOS. Nombres de Apollo/Helios.
+    #define TRAY_ICON WEB_DIR "images/logo-apollo.svg"
+    #define TRAY_ICON_PLAYING WEB_DIR "images/apollo-playing.svg"
+    #define TRAY_ICON_PAUSING WEB_DIR "images/apollo-pausing.svg"
+    #define TRAY_ICON_LOCKED WEB_DIR "images/apollo-locked.svg"
   #elif defined(__APPLE__) || defined(__MACH__)
     #define TRAY_ICON WEB_DIR "images/logo-apollo-16.png"
     #define TRAY_ICON_PLAYING WEB_DIR "images/apollo-playing-16.png"
     #define TRAY_ICON_PAUSING WEB_DIR "images/apollo-pausing-16.png"
     #define TRAY_ICON_LOCKED WEB_DIR "images/apollo-locked-16.png"
+    #include <CoreFoundation/CoreFoundation.h>
     #include <dispatch/dispatch.h>
+    #include <unordered_map>
   #endif
 
   #define TRAY_MSG_NO_APP_RUNNING "Reload Apps"
@@ -44,7 +69,7 @@
   // lib includes
   #include <boost/filesystem.hpp>
   #include <boost/process/v1/environment.hpp>
-  #include <tray/src/tray.h>
+  #include <tray.h>
 
   // local includes
   #include "config.h"
@@ -62,11 +87,6 @@ using namespace std::literals;
 namespace system_tray {
   static std::atomic tray_initialized = false;
 
-  // Threading variables for all platforms
-  static std::thread tray_thread;
-  static std::atomic tray_thread_running = false;
-  static std::atomic tray_thread_should_exit = false;
-
   void tray_open_ui_cb([[maybe_unused]] struct tray_menu *item) {
     BOOST_LOG(info) << "Opening UI from system tray"sv;
     launch_ui();
@@ -77,6 +97,33 @@ namespace system_tray {
     BOOST_LOG(info) << "Force stop from system tray"sv;
     proc::proc.terminate();
   }
+
+  #if defined(__linux__) || defined(linux) || defined(__linux) || defined(__FreeBSD__)
+  /**
+   * @brief Forwards Qt log messages to Sunshine's BOOST_LOG logger.
+   * @param level Log level: 0=debug, 1=info, 2=warning, 3=error.
+   * @param msg The message string from Qt.
+   */
+  static void qt_log_to_boost(int level, const char *msg) {
+    if (msg == nullptr) {
+      return;
+    }
+    switch (level) {
+      case 0:
+        BOOST_LOG(debug) << "Qt: " << msg;
+        break;
+      case 1:
+        BOOST_LOG(info) << "Qt: " << msg;
+        break;
+      case 2:
+        BOOST_LOG(warning) << "Qt: " << msg;
+        break;
+      default:
+        BOOST_LOG(error) << "Qt: " << msg;
+        break;
+    }
+  }
+  #endif
 
   void tray_reset_display_device_config_cb([[maybe_unused]] struct tray_menu *item) {
     BOOST_LOG(info) << "Resetting display device config from system tray"sv;
@@ -139,6 +186,64 @@ namespace system_tray {
     .iconPathCount = 4,
     .allIconPaths = {TRAY_ICON, TRAY_ICON_LOCKED, TRAY_ICON_PLAYING, TRAY_ICON_PAUSING},
   };
+
+  /**
+   * @brief Get resource path.
+   *
+   * @param relativePath Relative path.
+   * @return Absolute path to the resource file for the current platform bundle layout.
+   */
+  const char *GetResourcePath(const char *relativePath) {
+  #ifdef __APPLE__
+    if (!relativePath || !*relativePath) {
+      return nullptr;
+    }
+
+    // Simple cache ensures our string pointers live forever
+    static std::unordered_map<std::string, std::string> g_cache;
+    auto search = g_cache.find(relativePath);
+    if (search != g_cache.end()) {
+      return search->second.c_str();
+    }
+
+    // If we're running from an .app bundle, get the internal Resources dir
+    CFBundleRef bundle = CFBundleGetMainBundle();
+    if (!bundle) {
+      return relativePath;
+    }
+
+    CFURLRef resourcesURL = CFBundleCopyResourcesDirectoryURL(bundle);
+    if (!resourcesURL) {
+      return relativePath;
+    }
+
+    char resourcesPath[PATH_MAX];
+    bool ok = CFURLGetFileSystemRepresentation(
+      resourcesURL,
+      true,
+      reinterpret_cast<UInt8 *>(resourcesPath),
+      sizeof(resourcesPath)
+    );
+    CFRelease(resourcesURL);
+    if (!ok) {
+      return relativePath;
+    }
+
+    std::string full;
+    if (relativePath && relativePath[0] == '/') {
+      full = relativePath;
+    } else {
+      full = std::string(resourcesPath) + "/" + relativePath;
+    }
+
+    BOOST_LOG(debug) << "System Tray: using " << full << " for icon path";
+
+    auto [it, inserted] = g_cache.emplace(relativePath, std::move(full));
+    return it->second.c_str();
+  #else
+    return relativePath;
+  #endif
+  }
 
   int init_tray() {
   #ifdef _WIN32
@@ -203,6 +308,22 @@ namespace system_tray {
     }
   #endif
 
+  #ifdef __APPLE__
+    // if these icon paths are relative, resolve to internal .app Resources path
+    tray.allIconPaths[0] = GetResourcePath(TRAY_ICON);
+    tray.allIconPaths[1] = GetResourcePath(TRAY_ICON_LOCKED);
+    tray.allIconPaths[2] = GetResourcePath(TRAY_ICON_PLAYING);
+    tray.allIconPaths[3] = GetResourcePath(TRAY_ICON_PAUSING);
+
+    tray.icon = tray.allIconPaths[0];
+  #endif
+
+  #if defined(__linux__) || defined(linux) || defined(__linux) || defined(__FreeBSD__)
+    tray_set_log_callback(qt_log_to_boost);
+  #endif
+
+    tray_set_app_info(PROJECT_NAME, PROJECT_NAME, PROJECT_FQDN);
+
     if (tray_init(&tray) < 0) {
       BOOST_LOG(warning) << "Failed to create system tray"sv;
       return 1;
@@ -215,16 +336,12 @@ namespace system_tray {
 
   int process_tray_events() {
     if (!tray_initialized) {
+      BOOST_LOG(error) << "System tray is not initialized"sv;
       return 1;
     }
 
-    // Process one iteration of the tray loop with non-blocking mode (0)
-    if (const int result = tray_loop(0); result != 0) {
-      BOOST_LOG(warning) << "System tray loop failed"sv;
-      return result;
-    }
-
-    return 0;
+    // Block until an event is processed or tray_quit() is called
+    return tray_loop(1);
   }
 
   int end_tray() {
@@ -413,40 +530,22 @@ namespace system_tray {
 
   // Threading functions available on all platforms
   static void tray_thread_worker() {
+    platf::set_thread_name("system_tray");
     BOOST_LOG(info) << "System tray thread started"sv;
 
     // Initialize the tray in this thread
     if (init_tray() != 0) {
       BOOST_LOG(error) << "Failed to initialize tray in thread"sv;
-      tray_thread_running = false;
       return;
     }
 
-    tray_thread_running = true;
-
     // Main tray event loop
-    while (!tray_thread_should_exit) {
-      if (process_tray_events() != 0) {
-        BOOST_LOG(warning) << "Tray event processing failed in thread"sv;
-        break;
-      }
+    while (process_tray_events() == 0);
 
-      // Sleep to avoid busy waiting
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-
-    // Clean up the tray
-    end_tray();
-    tray_thread_running = false;
     BOOST_LOG(info) << "System tray thread ended"sv;
   }
 
   int init_tray_threaded() {
-    if (tray_thread_running) {
-      BOOST_LOG(warning) << "Tray thread is already running"sv;
-      return 1;
-    }
-
   #ifdef _WIN32
     std::string tmp_str = "Open Helios (" + config::nvhttp.sunshine_name + ":" + std::to_string(net::map_port(confighttp::PORT_HTTPS)) + ")";
     static const std::string title_str = utf8ToAcp(tmp_str);
@@ -459,34 +558,12 @@ namespace system_tray {
       tray.menu[1].text = nullptr;
     }
 
-    tray_thread_should_exit = false;
-
     try {
-      tray_thread = std::thread(tray_thread_worker);
+      auto tray_thread = std::jthread(tray_thread_worker);
 
-      // Wait for the thread to start and initialize
-      const auto start_time = std::chrono::steady_clock::now();
-      while (!tray_thread_running && !tray_thread_should_exit) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-        // Timeout after 10 seconds
-        if (std::chrono::steady_clock::now() - start_time > std::chrono::seconds(10)) {
-          BOOST_LOG(error) << "Tray thread initialization timeout"sv;
-          tray_thread_should_exit = true;
-          if (tray_thread.joinable()) {
-            tray_thread.join();
-          }
-          return 1;
-        }
-      }
-
-      if (!tray_thread_running) {
-        BOOST_LOG(error) << "Tray thread failed to start"sv;
-        if (tray_thread.joinable()) {
-          tray_thread.join();
-        }
-        return 1;
-      }
+      // The tray thread doesn't require strong lifetime management.
+      // It will exit asynchronously when tray_exit() is called.
+      tray_thread.detach();
 
       BOOST_LOG(info) << "System tray thread initialized successfully"sv;
       return 0;
@@ -494,22 +571,6 @@ namespace system_tray {
       BOOST_LOG(error) << "Failed to create tray thread: " << e.what();
       return 1;
     }
-  }
-
-  int end_tray_threaded() {
-    if (!tray_thread_running) {
-      return 0;
-    }
-
-    BOOST_LOG(info) << "Stopping system tray thread"sv;
-    tray_thread_should_exit = true;
-
-    if (tray_thread.joinable()) {
-      tray_thread.join();
-    }
-
-    BOOST_LOG(info) << "System tray thread stopped"sv;
-    return 0;
   }
 
 }  // namespace system_tray

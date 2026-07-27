@@ -40,6 +40,11 @@ using asio::ip::udp;
 using namespace std::literals;
 
 namespace rtsp_stream {
+  /**
+   * @brief Release msg resources.
+   *
+   * @param msg Raw RTSP message buffer being parsed or encrypted.
+   */
   void free_msg(PRTSP_MESSAGE msg) {
     freeMessage(msg);
 
@@ -48,46 +53,102 @@ namespace rtsp_stream {
 
 #pragma pack(push, 1)
 
+  /**
+   * @brief Encrypted RTSP message header used by GameStream.
+   */
   struct encrypted_rtsp_header_t {
     // We set the MSB in encrypted RTSP messages to allow format-agnostic
     // parsing code to be able to tell encrypted from plaintext messages.
-    static constexpr std::uint32_t ENCRYPTED_MESSAGE_TYPE_BIT = 0x80000000;
+    static constexpr std::uint32_t ENCRYPTED_MESSAGE_TYPE_BIT = 0x80000000;  ///< Protocol or platform constant for encrypted message type bit.
 
+    /**
+     * @brief Return a pointer to the protocol payload following the packet header.
+     *
+     * @return Parsed or serialized payload data.
+     */
     uint8_t *payload() {
       return (uint8_t *) (this + 1);
     }
 
+    /**
+     * @brief Decode the RTSP interleaved-frame payload length.
+     *
+     * @return Payload byte count with the encrypted-message flag masked out.
+     */
     std::uint32_t payload_length() {
       return util::endian::big<std::uint32_t>(typeAndLength) & ~ENCRYPTED_MESSAGE_TYPE_BIT;
     }
 
+    /**
+     * @brief Check whether encrypted.
+     *
+     * @return True when the RTSP connection is using TLS.
+     */
     bool is_encrypted() {
       return !!(util::endian::big<std::uint32_t>(typeAndLength) & ENCRYPTED_MESSAGE_TYPE_BIT);
     }
 
     // This field is the length of the payload + ENCRYPTED_MESSAGE_TYPE_BIT in big-endian
-    std::uint32_t typeAndLength;
+    std::uint32_t typeAndLength;  ///< Type and length.
 
     // This field is the number used to initialize the bottom 4 bytes of the AES IV in big-endian
-    std::uint32_t sequenceNumber;
+    std::uint32_t sequenceNumber;  ///< Sequence number.
 
     // This field is the AES GCM authentication tag
-    std::uint8_t tag[16];
+    std::uint8_t tag[16];  ///< Authentication tag appended to the encrypted payload.
   };
 
 #pragma pack(pop)
 
   class rtsp_server_t;
 
+  /**
+   * @brief Owning pointer for an RTSP message allocated by moonlight-common-c.
+   */
   using msg_t = util::safe_ptr<RTSP_MESSAGE, free_msg>;
+  /**
+   * @brief RTSP command handler signature used by the server dispatch table.
+   */
   using cmd_func_t = std::function<void(rtsp_server_t *server, tcp::socket &, launch_session_t &, msg_t &&)>;
 
+  /**
+   * @brief Write msg details to the log.
+   *
+   * @param msg Raw RTSP message buffer being parsed or encrypted.
+   */
   void print_msg(PRTSP_MESSAGE msg);
+  /**
+   * @brief Send the RTSP response used for unsupported commands.
+   *
+   * @param sock Socket used to read or write the protocol message.
+   * @param session Active streaming or pairing session for the request.
+   * @param req Parsed RTSP request being handled.
+   */
   void cmd_not_found(tcp::socket &sock, launch_session_t &, msg_t &&req);
+  /**
+   * @brief Send the protocol response for the current request.
+   *
+   * @param sock Socket used to read or write the protocol message.
+   * @param session Active streaming or pairing session for the request.
+   * @param options Request options or socket options to apply.
+   * @param statuscode RTSP status code to send in the response.
+   * @param status_msg Status msg.
+   * @param seqn RTSP CSeq value associated with the request.
+   * @param payload Optional payload body to include in the response.
+   */
   void respond(tcp::socket &sock, launch_session_t &session, POPTION_ITEM options, int statuscode, const char *status_msg, int seqn, const std::string_view &payload);
 
+  /**
+   * @brief RTSP client socket state and receive buffer parser.
+   */
   class socket_t: public std::enable_shared_from_this<socket_t> {
   public:
+    /**
+     * @brief Construct an RTSP socket wrapper around an accepted TCP connection.
+     *
+     * @param io_context Io context.
+     * @param handle_data_fn Handle data.
+     */
     socket_t(boost::asio::io_context &io_context, std::function<void(tcp::socket &sock, launch_session_t &, msg_t &&)> &&handle_data_fn):
         handle_data_fn {std::move(handle_data_fn)},
         sock {io_context} {
@@ -125,7 +186,7 @@ namespace rtsp_stream {
     }
 
     /**
-     * @brief Handle the initial read of the header of an encrypted message.
+     * @brief Read the encrypted RTSP header before receiving the encrypted payload.
      * @param socket The socket the message was received on.
      * @param ec The error code of the read operation.
      * @param bytes The number of bytes read.
@@ -174,7 +235,7 @@ namespace rtsp_stream {
     }
 
     /**
-     * @brief Handle the final read of the content of an encrypted message.
+     * @brief Read and decrypt the encrypted RTSP payload.
      * @param socket The socket the message was received on.
      * @param ec The error code of the read operation.
      * @param bytes The number of bytes read.
@@ -224,7 +285,7 @@ namespace rtsp_stream {
       }
 
       msg_t req {new msg_t::element_type {}};
-      if (auto status = parseRtspMessage(req.get(), (char *) plaintext.data(), plaintext.size())) {
+      if (auto status = parseRtspMessage(req.get(), (char *) plaintext.data(), (int) plaintext.size())) {
         BOOST_LOG(error) << "Malformed RTSP message: ["sv << status << ']';
 
         respond(socket->sock, *socket->session, nullptr, 400, "BAD REQUEST", 0, {});
@@ -265,7 +326,7 @@ namespace rtsp_stream {
     }
 
     /**
-     * @brief Handle the read of the payload portion of a plaintext message.
+     * @brief Read the plaintext RTSP payload after the header is parsed.
      * @param socket The socket the message was received on.
      * @param ec The error code of the read operation.
      * @param bytes The number of bytes read.
@@ -290,7 +351,7 @@ namespace rtsp_stream {
 
       auto end = socket->begin + bytes;
       msg_t req {new msg_t::element_type {}};
-      if (auto status = parseRtspMessage(req.get(), socket->msg_buf.data(), (std::size_t) (end - socket->msg_buf.data()))) {
+      if (auto status = parseRtspMessage(req.get(), socket->msg_buf.data(), (int) (end - socket->msg_buf.data()))) {
         BOOST_LOG(error) << "Malformed RTSP message: ["sv << status << ']';
 
         respond(socket->sock, *socket->session, nullptr, 400, "BAD REQUEST", 0, {});
@@ -315,7 +376,7 @@ namespace rtsp_stream {
             return (bool) std::isdigit(ch);
           });
 
-          content_length = util::from_chars(begin, std::end(content));
+          content_length = (int) util::from_chars(begin, std::end(content));
           break;
         }
       }
@@ -335,7 +396,7 @@ namespace rtsp_stream {
     }
 
     /**
-     * @brief Handle the read of the header portion of a plaintext message.
+     * @brief Read and parse the plaintext RTSP request header.
      * @param socket The socket the message was received on.
      * @param ec The error code of the read operation.
      * @param bytes The number of bytes read.
@@ -382,28 +443,44 @@ namespace rtsp_stream {
       handle_plaintext_payload(socket, ec, buf_size);
     }
 
+    /**
+     * @brief Dispatch a parsed RTSP request to the socket's command handler.
+     *
+     * @param req Parsed RTSP request being handled.
+     */
     void handle_data(msg_t &&req) {
       handle_data_fn(sock, *session, std::move(req));
     }
 
-    std::function<void(tcp::socket &sock, launch_session_t &, msg_t &&)> handle_data_fn;
+    std::function<void(tcp::socket &sock, launch_session_t &, msg_t &&)> handle_data_fn;  ///< Command dispatcher installed by the RTSP server.
 
-    tcp::socket sock;
+    tcp::socket sock;  ///< TCP socket connected to the RTSP client.
 
-    std::array<char, 2048> msg_buf;
+    std::array<char, 2048> msg_buf;  ///< Receive buffer for one RTSP request header and payload.
 
-    char *crlf;
-    char *begin = msg_buf.data();
+    char *crlf;  ///< Pointer to the next CRLF delimiter while parsing the receive buffer.
+    char *begin = msg_buf.data();  ///< Start of the unparsed data currently in `msg_buf`.
 
-    std::shared_ptr<launch_session_t> session;
+    std::shared_ptr<launch_session_t> session;  ///< Launch session claimed by this RTSP socket.
   };
 
+  /**
+   * @brief RTSP listener that matches incoming clients to pending launch sessions.
+   */
   class rtsp_server_t {
   public:
     ~rtsp_server_t() {
       clear();
     }
 
+    /**
+     * @brief Bind the underlying socket or graphics resource to its target.
+     *
+     * @param af Address family used for socket creation or binding.
+     * @param port TCP or UDP port number.
+     * @param ec Error code returned by the asynchronous operation.
+     * @return Network operation status.
+     */
     int bind(net::af_e af, std::uint16_t port, boost::system::error_code &ec) {
       acceptor.open(af == net::IPV4 ? tcp::v4() : tcp::v6(), ec);
       if (ec) {
@@ -412,7 +489,14 @@ namespace rtsp_stream {
 
       acceptor.set_option(boost::asio::socket_base::reuse_address {true});
 
-      acceptor.bind(tcp::endpoint(af == net::IPV4 ? tcp::v4() : tcp::v6(), port), ec);
+      auto bind_addr_str = net::get_bind_address(af);
+      const auto bind_addr = boost::asio::ip::make_address(bind_addr_str, ec);
+      if (ec) {
+        BOOST_LOG(error) << "Invalid bind address: "sv << bind_addr_str << " - " << ec.message();
+        return -1;
+      }
+
+      acceptor.bind(tcp::endpoint(bind_addr, port), ec);
       if (ec) {
         return -1;
       }
@@ -433,6 +517,13 @@ namespace rtsp_stream {
       return 0;
     }
 
+    /**
+     * @brief Dispatch a parsed RTSP request to its handler.
+     *
+     * @param sock Socket used to read or write the protocol message.
+     * @param session Active streaming or pairing session for the request.
+     * @param req Parsed RTSP request being handled.
+     */
     void handle_msg(tcp::socket &sock, launch_session_t &session, msg_t &&req) {
       auto func = _map_cmd_cb.find(req->message.request.command);
       if (func != std::end(_map_cmd_cb)) {
@@ -445,6 +536,11 @@ namespace rtsp_stream {
       sock.shutdown(boost::asio::socket_base::shutdown_type::shutdown_both, ec);
     }
 
+    /**
+     * @brief Accept a pending connection and arm the server for the next client.
+     *
+     * @param ec Error code returned by the asynchronous operation.
+     */
     void handle_accept(const boost::system::error_code &ec) {
       if (ec) {
         BOOST_LOG(error) << "Couldn't accept incoming connections: "sv << ec.message();
@@ -479,6 +575,12 @@ namespace rtsp_stream {
       });
     }
 
+    /**
+     * @brief Register or visit handlers stored in the map.
+     *
+     * @param type Protocol, message, or resource type selector.
+     * @param cb Callback invoked for each matching message or session.
+     */
     void map(const std::string_view &type, cmd_func_t cb) {
       _map_cmd_cb.emplace(type, std::move(cb));
     }
@@ -534,10 +636,10 @@ namespace rtsp_stream {
      */
     int session_count() {
       auto lg = _session_slots.lock();
-      return _session_slots->size();
+      return (int) _session_slots->size();
     }
 
-    safe::event_t<std::shared_ptr<launch_session_t>> launch_event;
+    safe::event_t<std::shared_ptr<launch_session_t>> launch_event;  ///< Launch event.
 
     /**
      * @brief Clear launch sessions.
@@ -555,6 +657,25 @@ namespace rtsp_stream {
           stream::session::stop(slot);
           stream::session::join(slot);
 
+          i = _session_slots->erase(i);
+        } else {
+          i++;
+        }
+      }
+    }
+
+    /**
+     * @brief Clear by cert state.
+     *
+     * @param cert Certificate data or object used by the operation.
+     */
+    void clear_by_cert(std::string_view cert) {
+      auto lg = _session_slots.lock();
+      for (auto i = _session_slots->begin(); i != _session_slots->end();) {
+        auto &slot = *(*i);
+        if (stream::session::client_cert(slot) == cert) {
+          stream::session::stop(slot);
+          stream::session::join(slot);
           i = _session_slots->erase(i);
         } else {
           i++;
@@ -640,8 +761,11 @@ namespace rtsp_stream {
     std::shared_ptr<socket_t> next_socket;
   };
 
-  rtsp_server_t server {};
+  rtsp_server_t server {};  ///< Singleton RTSP server used by GameStream launch sessions.
 
+  /**
+   * @brief Queue a launch session until the RTSP client connects.
+   */
   void launch_session_raise(std::shared_ptr<launch_session_t> launch_session) {
     server.session_raise(std::move(launch_session));
   }
@@ -669,6 +793,20 @@ namespace rtsp_stream {
     server.clear(true);
   }
 
+  /**
+   * @brief Terminate active sessions associated with a client certificate.
+   */
+  void terminate_sessions_by_cert(std::string_view cert) {
+    server.clear_by_cert(cert);
+  }
+
+  /**
+   * @brief Send the serialized response over the active socket.
+   *
+   * @param sock Socket used to read or write the protocol message.
+   * @param sv String view containing the text to inspect.
+   * @return Network operation status.
+   */
   int send(tcp::socket &sock, const std::string_view &sv) {
     std::size_t bytes_send = 0;
 
@@ -685,6 +823,13 @@ namespace rtsp_stream {
     return 0;
   }
 
+  /**
+   * @brief Send the protocol response for the current request.
+   *
+   * @param sock Socket used to read or write the protocol message.
+   * @param session Active streaming or pairing session for the request.
+   * @param resp RTSP response string to send to the client.
+   */
   void respond(tcp::socket &sock, launch_session_t &session, msg_t &resp) {
     auto payload = std::make_pair(resp->payload, resp->payloadLength);
 
@@ -753,6 +898,9 @@ namespace rtsp_stream {
     }
   }
 
+  /**
+   * @brief Send the protocol response for the current request.
+   */
   void respond(tcp::socket &sock, launch_session_t &session, POPTION_ITEM options, int statuscode, const char *status_msg, int seqn, const std::string_view &payload) {
     msg_t resp {new msg_t::element_type};
     createRtspResponse(resp.get(), nullptr, 0, const_cast<char *>("RTSP/1.0"), statuscode, const_cast<char *>(status_msg), seqn, options, const_cast<char *>(payload.data()), (int) payload.size());
@@ -760,10 +908,21 @@ namespace rtsp_stream {
     respond(sock, session, resp);
   }
 
+  /**
+   * @brief Handle an unsupported RTSP command.
+   */
   void cmd_not_found(tcp::socket &sock, launch_session_t &session, msg_t &&req) {
     respond(sock, session, nullptr, 404, "NOT FOUND", req->sequenceNumber, {});
   }
 
+  /**
+   * @brief Handle RTSP OPTIONS requests.
+   *
+   * @param server RTSP server instance handling the request.
+   * @param sock Socket used to read or write the protocol message.
+   * @param session Active streaming or pairing session for the request.
+   * @param req Parsed RTSP request being handled.
+   */
   void cmd_option(rtsp_server_t *server, tcp::socket &sock, launch_session_t &session, msg_t &&req) {
     OPTION_ITEM option {};
 
@@ -776,6 +935,14 @@ namespace rtsp_stream {
     respond(sock, session, &option, 200, "OK", req->sequenceNumber, {});
   }
 
+  /**
+   * @brief Handle RTSP DESCRIBE requests.
+   *
+   * @param server RTSP server instance.
+   * @param sock Client socket.
+   * @param session Launch session.
+   * @param req RTSP request message.
+   */
   void cmd_describe(rtsp_server_t *server, tcp::socket &sock, launch_session_t &session, msg_t &&req) {
     OPTION_ITEM option {};
 
@@ -859,6 +1026,14 @@ namespace rtsp_stream {
     respond(sock, session, &option, 200, "OK", req->sequenceNumber, ss.str());
   }
 
+  /**
+   * @brief Handle RTSP SETUP requests and prepare transport state.
+   *
+   * @param server RTSP server instance handling the request.
+   * @param sock Socket used to read or write the protocol message.
+   * @param session Active streaming or pairing session for the request.
+   * @param req Parsed RTSP request being handled.
+   */
   void cmd_setup(rtsp_server_t *server, tcp::socket &sock, launch_session_t &session, msg_t &&req) {
     OPTION_ITEM options[4] {};
 
@@ -918,6 +1093,14 @@ namespace rtsp_stream {
     respond(sock, session, &seqn, 200, "OK", req->sequenceNumber, {});
   }
 
+  /**
+   * @brief Handle RTSP ANNOUNCE requests from the client.
+   *
+   * @param server RTSP server instance handling the request.
+   * @param sock Socket used to read or write the protocol message.
+   * @param session Active streaming or pairing session for the request.
+   * @param req Parsed RTSP request being handled.
+   */
   void cmd_announce(rtsp_server_t *server, tcp::socket &sock, launch_session_t &session, msg_t &&req) {
     OPTION_ITEM option {};
 
@@ -985,43 +1168,72 @@ namespace rtsp_stream {
     args.try_emplace("x-ss-general.encryptionEnabled"sv, "0"sv);
     args.try_emplace("x-ss-video[0].chromaSamplingType"sv, "0"sv);
     args.try_emplace("x-ss-video[0].intraRefresh"sv, "0"sv);
+    args.try_emplace("x-nv-video[0].clientRefreshRateX100"sv, "0"sv);
 
     stream::config_t config;
 
     std::int64_t configuredBitrateKbps;
     config.audio.flags[audio::config_t::HOST_AUDIO] = session.host_audio;
     try {
-      config.audio.channels = util::from_view(args.at("x-nv-audio.surround.numChannels"sv));
-      config.audio.mask = util::from_view(args.at("x-nv-audio.surround.channelMask"sv));
-      config.audio.packetDuration = util::from_view(args.at("x-nv-aqos.packetDuration"sv));
+      config.audio.channels = (int) util::from_view(args.at("x-nv-audio.surround.numChannels"sv));
+      config.audio.mask = (int) util::from_view(args.at("x-nv-audio.surround.channelMask"sv));
+      config.audio.packetDuration = (int) util::from_view(args.at("x-nv-aqos.packetDuration"sv));
 
       config.audio.flags[audio::config_t::HIGH_QUALITY] =
         util::from_view(args.at("x-nv-audio.surround.AudioQuality"sv));
 
-      config.controlProtocolType = util::from_view(args.at("x-nv-general.useReliableUdp"sv));
-      config.packetsize = util::from_view(args.at("x-nv-video[0].packetSize"sv));
-      config.minRequiredFecPackets = util::from_view(args.at("x-nv-vqos[0].fec.minRequiredFecPackets"sv));
-      config.mlFeatureFlags = util::from_view(args.at("x-ml-general.featureFlags"sv));
-      config.audioQosType = util::from_view(args.at("x-nv-aqos.qosTrafficType"sv));
-      config.videoQosType = util::from_view(args.at("x-nv-vqos[0].qosTrafficType"sv));
-      config.encryptionFlagsEnabled = util::from_view(args.at("x-ss-general.encryptionEnabled"sv));
+      config.controlProtocolType = (int) util::from_view(args.at("x-nv-general.useReliableUdp"sv));
+      config.packetsize = (int) util::from_view(args.at("x-nv-video[0].packetSize"sv));
+      config.minRequiredFecPackets = (int) util::from_view(args.at("x-nv-vqos[0].fec.minRequiredFecPackets"sv));
+      config.mlFeatureFlags = (int) util::from_view(args.at("x-ml-general.featureFlags"sv));
+      config.audioQosType = (int) util::from_view(args.at("x-nv-aqos.qosTrafficType"sv));
+      config.videoQosType = (int) util::from_view(args.at("x-nv-vqos[0].qosTrafficType"sv));
+      config.encryptionFlagsEnabled = (uint32_t) util::from_view(args.at("x-ss-general.encryptionEnabled"sv));
 
       // Legacy clients use nvFeatureFlags to indicate support for audio encryption
       if (util::from_view(args.at("x-nv-general.featureFlags"sv)) & 0x20) {
         config.encryptionFlagsEnabled |= SS_ENC_AUDIO;
       }
 
-      config.monitor.height = util::from_view(args.at("x-nv-video[0].clientViewportHt"sv));
-      config.monitor.width = util::from_view(args.at("x-nv-video[0].clientViewportWd"sv));
-      config.monitor.framerate = util::from_view(args.at("x-nv-video[0].maxFPS"sv));
-      config.monitor.bitrate = util::from_view(args.at("x-nv-vqos[0].bw.maximumBitrateKbps"sv));
-      config.monitor.slicesPerFrame = util::from_view(args.at("x-nv-video[0].videoEncoderSlicesPerFrame"sv));
-      config.monitor.numRefFrames = util::from_view(args.at("x-nv-video[0].maxNumReferenceFrames"sv));
-      config.monitor.encoderCscMode = util::from_view(args.at("x-nv-video[0].encoderCscMode"sv));
-      config.monitor.videoFormat = util::from_view(args.at("x-nv-vqos[0].bitStreamFormat"sv));
-      config.monitor.dynamicRange = util::from_view(args.at("x-nv-video[0].dynamicRangeMode"sv));
-      config.monitor.chromaSamplingType = util::from_view(args.at("x-ss-video[0].chromaSamplingType"sv));
-      config.monitor.enableIntraRefresh = util::from_view(args.at("x-ss-video[0].intraRefresh"sv));
+      // Limit the packetsize to avoid fragmentation with clients that cannot configure this value
+      if (config::stream.packetsize && config::stream.packetsize < config.packetsize) {
+        if (config::stream.packetsize < config::PACKETSIZE_MIN || config::stream.packetsize > config::PACKETSIZE_MAX) {
+          BOOST_LOG(warning) << "packetsize range: ["sv << config::PACKETSIZE_MIN << "-"sv << config::PACKETSIZE_MAX
+                             << "] invalid value: "sv << config::stream.packetsize;
+        } else {
+          if (config::stream.packetsize < config::PACKETSIZE_SMALL) {
+            BOOST_LOG(info) << "packetsize is small < "sv << config::PACKETSIZE_SMALL << " bytes, reduce bitrate if the stream breaks"sv;
+          } else if (config::stream.packetsize > config::PACKETSIZE_LARGE) {
+            BOOST_LOG(info) << "packetsize is large > "sv << config::PACKETSIZE_LARGE << " bytes, jumbo frames may be used"sv;
+          }
+
+          BOOST_LOG(info) << "packetsize limit: "sv << config.packetsize << " -> "sv << config::stream.packetsize << " bytes"sv;
+          config.packetsize = config::stream.packetsize;
+        }
+      }
+
+      config.monitor.height = (int) util::from_view(args.at("x-nv-video[0].clientViewportHt"sv));
+      config.monitor.width = (int) util::from_view(args.at("x-nv-video[0].clientViewportWd"sv));
+      config.monitor.framerate = (int) util::from_view(args.at("x-nv-video[0].maxFPS"sv));
+      config.monitor.framerateX100 = (int) util::from_view(args.at("x-nv-video[0].clientRefreshRateX100"sv));
+      // Validate framerateX100 against framerate. Some clients (e.g. Moonlight Android) send the
+      // client display's refresh rate as clientRefreshRateX100, which may differ from the requested
+      // streaming framerate. Discard framerateX100 if the derived fps is not within 1% of framerate.
+      if (config.monitor.framerateX100 > 0) {
+        double fps_strict = config.monitor.framerateX100 / 100.0;
+        double ratio = fps_strict / config.monitor.framerate;
+        if (ratio < 0.99 || ratio > 1.01) {
+          config.monitor.framerateX100 = 0;
+        }
+      }
+      config.monitor.bitrate = (int) util::from_view(args.at("x-nv-vqos[0].bw.maximumBitrateKbps"sv));
+      config.monitor.slicesPerFrame = (int) util::from_view(args.at("x-nv-video[0].videoEncoderSlicesPerFrame"sv));
+      config.monitor.numRefFrames = (int) util::from_view(args.at("x-nv-video[0].maxNumReferenceFrames"sv));
+      config.monitor.encoderCscMode = (int) util::from_view(args.at("x-nv-video[0].encoderCscMode"sv));
+      config.monitor.videoFormat = (int) util::from_view(args.at("x-nv-vqos[0].bitStreamFormat"sv));
+      config.monitor.dynamicRange = (int) util::from_view(args.at("x-nv-video[0].dynamicRangeMode"sv));
+      config.monitor.chromaSamplingType = (int) util::from_view(args.at("x-ss-video[0].chromaSamplingType"sv));
+      config.monitor.enableIntraRefresh = (int) util::from_view(args.at("x-ss-video[0].intraRefresh"sv));
 
       if (config::video.limit_framerate) {
         config.monitor.encodingFramerate = session.fps;
@@ -1103,6 +1315,10 @@ namespace rtsp_stream {
       }
       config.audio.flags[audio::config_t::CUSTOM_SURROUND_PARAMS] = valid;
     }
+    if (session.continuous_audio) {
+      BOOST_LOG(info) << "Client requested continuous audio"sv;
+      config.audio.flags[audio::config_t::CONTINUOUS_AUDIO] = true;
+    }
 
     config.audio.input_only = session.input_only;
 
@@ -1129,7 +1345,7 @@ namespace rtsp_stream {
       configuredBitrateKbps -= std::min((std::int64_t) 500, configuredBitrateKbps / 10);
 
       BOOST_LOG(debug) << "Final adjusted video encoding bitrate is "sv << configuredBitrateKbps << " Kbps"sv;
-      config.monitor.bitrate = configuredBitrateKbps;
+      config.monitor.bitrate = (int) configuredBitrateKbps;
     }
 
     if (config.monitor.videoFormat == 1 && video::active_hevc_mode == 1) {
@@ -1170,6 +1386,14 @@ namespace rtsp_stream {
     respond(sock, session, &option, 200, "OK", req->sequenceNumber, {});
   }
 
+  /**
+   * @brief Handle RTSP PLAY requests and start streaming.
+   *
+   * @param server RTSP server instance handling the request.
+   * @param sock Socket used to read or write the protocol message.
+   * @param session Active streaming or pairing session for the request.
+   * @param req Parsed RTSP request being handled.
+   */
   void cmd_play(rtsp_server_t *server, tcp::socket &sock, launch_session_t &session, msg_t &&req) {
     OPTION_ITEM option {};
 
@@ -1183,6 +1407,7 @@ namespace rtsp_stream {
   }
 
   void start() {
+    platf::set_thread_name("rtsp");
     auto shutdown_event = mail::man->event<bool>(mail::shutdown);
 
     server.map("OPTIONS"sv, &cmd_option);
@@ -1199,7 +1424,8 @@ namespace rtsp_stream {
       return;
     }
 
-    std::thread rtsp_thread {[&shutdown_event] {
+    std::jthread rtsp_thread {[&shutdown_event] {
+      platf::set_thread_name("rtsp::handler");
       auto broadcast_shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
 
       while (!shutdown_event->peek()) {
@@ -1224,6 +1450,9 @@ namespace rtsp_stream {
     rtsp_thread.join();
   }
 
+  /**
+   * @brief Write msg details to the log.
+   */
   void print_msg(PRTSP_MESSAGE msg) {
     std::string_view type = msg->type == TYPE_RESPONSE ? "RESPONSE"sv : "REQUEST"sv;
 

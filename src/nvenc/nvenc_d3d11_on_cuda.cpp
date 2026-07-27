@@ -9,10 +9,10 @@
   // local includes
   #include "nvenc_utils.h"
 
-namespace nvenc {
+namespace NVENC_NAMESPACE {
 
-  nvenc_d3d11_on_cuda::nvenc_d3d11_on_cuda(ID3D11Device *d3d_device):
-      nvenc_d3d11(NV_ENC_DEVICE_TYPE_CUDA),
+  nvenc_d3d11_on_cuda::nvenc_d3d11_on_cuda(ID3D11Device *d3d_device, ::nvenc::shared_dll dll):
+      nvenc_d3d11(NV_ENC_DEVICE_TYPE_CUDA, std::move(dll)),
       d3d_device(d3d_device) {
   }
 
@@ -169,7 +169,7 @@ namespace nvenc {
     }
 
     if (!registered_input_buffer) {
-      NV_ENC_REGISTER_RESOURCE register_resource = {min_struct_version(NV_ENC_REGISTER_RESOURCE_VER, 3, 4)};
+      NV_ENC_REGISTER_RESOURCE register_resource = {NV_ENC_REGISTER_RESOURCE_VER};
       register_resource.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
       register_resource.width = encoder_params.width;
       register_resource.height = encoder_params.height;
@@ -265,5 +265,5 @@ namespace nvenc {
     }
   }
 
-}  // namespace nvenc
+}  // namespace NVENC_NAMESPACE
 #endif

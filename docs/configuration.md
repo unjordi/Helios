@@ -26,6 +26,7 @@ location by modifying the configuration file.
 | OS      | Location                                        |
 |---------|-------------------------------------------------|
 | Docker  | @code{}/config@endcode                          |
+| FreeBSD | @code{}~/.config/sunshine@endcode               |
 | Linux   | @code{}~/.config/sunshine@endcode               |
 | macOS   | @code{}~/.config/sunshine@endcode               |
 | Windows | @code{}%ProgramFiles%\\Sunshine\\config@endcode |
@@ -339,12 +340,12 @@ editing the `conf` file in a text editor. Use the examples as reference.
     <tr>
         <td>ds5</td>
         <td>DualShock 5 controller (PS5)
-            @note{This option applies to Linux only.}</td>
+            @note{This option applies to FreeBSD and Linux only.}</td>
     </tr>
     <tr>
         <td>switch</td>
         <td>Switch Pro controller
-            @note{This option applies to Linux only.}</td>
+            @note{This option applies to FreeBSD and Linux only.}</td>
     </tr>
     <tr>
         <td>x360</td>
@@ -354,7 +355,7 @@ editing the `conf` file in a text editor. Use the examples as reference.
     <tr>
         <td>xone</td>
         <td>Xbox One controller
-            @note{This option applies to Linux only.}</td>
+            @note{This option applies to FreeBSD and Linux only.}</td>
     </tr>
 </table>
 
@@ -735,14 +736,14 @@ editing the `conf` file in a text editor. Use the examples as reference.
             @tip{To find the name of the audio sink follow these instructions.
             <br>
             <br>
-            **Linux + pulseaudio:**
+            **FreeBSD/Linux + pulseaudio:**
             <br>
             @code{}
             pacmd list-sinks | grep "name:"
             @endcode
             <br>
             <br>
-            **Linux + pipewire:**
+            **FreeBSD/Linux + pipewire:**
             <br>
             @code{}
             pactl info | grep Source
@@ -776,7 +777,7 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td colspan="2">Sunshine will select the default audio device.</td>
     </tr>
     <tr>
-        <td>Example (Linux)</td>
+        <td>Example (FreeBSD/Linux)</td>
         <td colspan="2">@code{}
             audio_sink = alsa_output.pci-0000_09_00.3.analog-stereo
             @endcode</td>
@@ -883,7 +884,7 @@ editing the `conf` file in a text editor. Use the examples as reference.
             @tip{To find the appropriate values follow these instructions.
             <br>
             <br>
-            **Linux + VA-API:**
+            **FreeBSD/Linux + VA-API:**
             <br>
             Unlike with *amdvce* and *nvenc*, it doesn't matter if video encoding is done on a different GPU.
             @code{}
@@ -913,7 +914,7 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td colspan="2">Sunshine will select the default video card.</td>
     </tr>
     <tr>
-        <td>Example (Linux)</td>
+        <td>Example (FreeBSD/Linux)</td>
         <td colspan="2">@code{}
             adapter_name = /dev/dri/renderD128
             @endcode</td>
@@ -936,7 +937,7 @@ editing the `conf` file in a text editor. Use the examples as reference.
             @tip{To find the appropriate values follow these instructions.
             <br>
             <br>
-            **Linux:**
+            **FreeBSD/Linux:**
             <br>
             During Sunshine startup, you should see the list of detected displays:
             @code{}
@@ -947,7 +948,8 @@ editing the `conf` file in a text editor. Use the examples as reference.
             Info: Detected display: DP-1 (id: 3) connected: false
             Info: Detected display: DVI-D-1 (id: 4) connected: false
             @endcode
-            You need to use the id value inside the parenthesis, e.g. `1`.
+            It is recommended to use the stable display connector name (text right before the parenthesis, e.g. DP-0) for this value.
+            For wlgrab/x11grab and kmsgrab the numeric id value can also be used.
             <br>
             <br>
             **macOS:**
@@ -1021,7 +1023,7 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td colspan="2">Sunshine will select the default display.</td>
     </tr>
     <tr>
-        <td>Example (Linux)</td>
+        <td>Example (FreeBSD/Linux)</td>
         <td colspan="2">@code{}
             output_name = 0
             @endcode</td>
@@ -1522,6 +1524,46 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### bind_address
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Set the IP address to bind Sunshine to. This is useful when you have multiple network interfaces
+            and want to restrict Sunshine to a specific one. If not set, Sunshine will bind to all available
+            interfaces (0.0.0.0 for IPv4 or :: for IPv6).
+            <br><br>
+            <strong>Note:</strong> The address must be valid for the system and must match the address family
+            being used. When using IPv6, you can specify an IPv6 address even with address_family set to "both".
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            (empty - bind to all interfaces)
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example (IPv4)</td>
+        <td colspan="2">@code{}
+            bind_address = 192.168.1.100
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example (IPv6)</td>
+        <td colspan="2">@code{}
+            bind_address = 2001:db8::1
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example (Loopback)</td>
+        <td colspan="2">@code{}
+            bind_address = 127.0.0.1
+            @endcode</td>
+    </tr>
+</table>
+
 ### port
 
 <table>
@@ -1583,6 +1625,35 @@ editing the `conf` file in a text editor. Use the examples as reference.
     <tr>
         <td>wan</td>
         <td>Anyone may access the web ui</td>
+    </tr>
+</table>
+
+### csrf_allowed_origins
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Comma-separated list of additional allowed origins for CSRF protection. These origins will be
+            appended to the default allowed origins (localhost variants and the configured web UI port).
+            Requests from allowed origins can access state-changing API endpoints without CSRF tokens.
+            <br><br>
+            @attention{Only add origins you trust. Each origin must be a complete URL prefix
+            including protocol and host (e.g., https://example.com). Port numbers are optional.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            (empty - uses built-in defaults: https://localhost, https://127.0.0.1, https://[::1],
+            with configured UI port variants)
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            csrf_allowed_origins = https://myapp.local,https://custom.domain.com
+            @endcode</td>
     </tr>
 </table>
 
@@ -1700,6 +1771,67 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>Example</td>
         <td colspan="2">@code{}
             ping_timeout = 10000
+            @endcode</td>
+    </tr>
+</table>
+
+### packetsize
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Limit the packetsize to avoid fragmentation on a low MTU link.
+            @note{This helps avoid packet loss and micro-stutter on a layer 2 VPN with
+            clients that cannot configure this value, e.g. Moonlight for Android/iOS.
+            }
+            @tip{To discover the optimal value:
+            <ul>
+                <li>Send ping to the server with don't fragment flag (DF)</li>
+                <li>Find the size of the largest replay, and subtract 16</li>
+                <li>Monitor the traffic to ensure no fragmentation</li>
+            </ul>
+            If using a VPN tunnel:
+            <ul>
+                <li>Set MTU on the TUN/TAP interface, and</li>
+                <li>Ensure no fragmentation both inside and outside the tunnel</li>
+                <li>Max UDP size = MTU size - 28</li>
+                <li>`packetsize` = max UDP size - 16</li>
+                <li>Monitor the traffic to ensure no fragmentation</li>
+            </ul>
+            Sample calculation for OpenVPN layer 2, using IPv4:
+            <ul>
+                <li>1428 bytes for max ICMP/UDP size outside the tunnel</li>
+                <li>Subtract the OpenVPN overhead: 24 bytes (may vary)</li>
+                <li>1404 bytes for Ethernet inside the tunnel</li>
+                <li>Subtract the Ethernet header: 14 bytes</li>
+                <li>1390 bytes for MTU inside the tunnel</li>
+                <li>Subtract the IPv4 header: 20 bytes</li>
+                <li>Subtract the UDP header: 8 bytes</li>
+                <li>1362 bytes for UDP payload</li>
+                <li>Subtract: 16 bytes</li>
+                <li>1346 bytes for `packetsize`</li>
+            </ul>
+            }
+            @warning{Reduce the bitrate when using low values.
+            Values larger than 1456 require jumbo frames.
+            }
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            0
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Range</td>
+        <td colspan="2">0, 200-65535</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            packetsize = 1346
             @endcode</td>
     </tr>
 </table>
@@ -2053,9 +2185,14 @@ editing the `conf` file in a text editor. Use the examples as reference.
             @note{Applies to Linux only.}</td>
     </tr>
     <tr>
+        <td>kwin</td>
+        <td>Capture with KDE/KWin Wayland compositor via KDE screencasting.
+            @note{Applies to Linux only.}</td>
+    </tr>
+    <tr>
         <td>x11</td>
         <td>Uses XCB. This is the slowest and most CPU intensive so should be avoided if possible.
-            @note{Applies to Linux only.}</td>
+            @note{Applies to FreeBSD and Linux only.}</td>
     </tr>
     <tr>
         <td>ddx</td>
@@ -2104,7 +2241,12 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
     <tr>
         <td>vaapi</td>
-        <td>Use Linux VA-API (AMD, Intel)</td>
+        <td>Use VA-API (AMD, Intel)</td>
+    </tr>
+    <tr>
+        <td>vulkan</td>
+        <td>Use Vulkan encoder (AMD, Intel, NVIDIA).
+            @note{Applies to Linux only.}</td>
     </tr>
     <tr>
         <td>software</td>
@@ -2295,6 +2437,46 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td colspan="2">@code{}
             nvenc_realtime_hags = enabled
             @endcode</td>
+    </tr>
+</table>
+
+### nvenc_split_encode
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Split the encoding of each video frame over multiple NVENC hardware units.
+            Significantly reduces encoding latency with a marginal compression efficiency penalty.
+            This option is ignored if your GPU has a singular NVENC unit.
+            @note{This option only applies when using NVENC [encoder](#encoder) with HEVC or AV1.}
+            @note{Applies to Windows only.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            driver_decides
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            nvenc_split_encode = driver_decides
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="3">Choices</td>
+        <td>disabled</td>
+        <td>Disabled</td>
+    </tr>
+    <tr>
+        <td>driver_decides</td>
+        <td>The NVIDIA driver will automatically enable split frame encoding when the following conditions are met: 2+ NVENC units, resolution is at least 4K, and the preset is P1-P4.</td>
+    </tr>
+    <tr>
+        <td>enabled</td>
+        <td>Enabled</td>
     </tr>
 </table>
 
@@ -2846,6 +3028,125 @@ editing the `conf` file in a text editor. Use the examples as reference.
 
 ## VA-API Encoder
 
+### vaapi_blbrc
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Block level based bitrate control (BLBRC) can assign different bitrate on a per-block basis. May improve quality on supported devices.
+            @note{This option only applies when using the VA-API [encoder](#encoder).}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            disabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            vaapi_blbrc = enabled
+            @endcode</td>
+    </tr>
+</table>
+
+### vaapi_quality
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            The quality profile controls the tradeoff between speed and quality of encoding.
+            @note{This option only applies when using the VA-API [encoder](#encoder).}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            auto
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            vaapi_quality = auto
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="4">Choices</td>
+        <td>auto</td>
+        <td>driver default quality</td>
+    </tr>
+    <tr>
+        <td>speed</td>
+        <td>prefer speed</td>
+    </tr>
+    <tr>
+        <td>balanced</td>
+        <td>balanced</td>
+    </tr>
+    <tr>
+        <td>quality</td>
+        <td>prefer quality</td>
+    </tr>
+</table>
+
+### vaapi_rc
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            The encoder rate control.
+            @note{This option only applies when using the VA-API [encoder](#encoder).}
+            @warning{The automatic setting may override the driver-default rate control method to VBR and force [vaapi_strict_rc_buffer](#vaapi_strict_rc_buffer) enabled on certain configurations. Selecting another rate control manually will override this behaviour.}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            auto
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            vaapi_rc = vbr
+            @endcode</td>
+    </tr>
+    <tr>
+        <td rowspan="7">Choices</td>
+        <td>auto</td>
+        <td>driver default (or whitelisted override)</td>
+    </tr>
+        <tr>
+        <td>avbr</td>
+        <td>average variable bitrate</td>
+    </tr>
+    <tr>
+        <td>cbr</td>
+        <td>constant bitrate</td>
+    </tr>
+        <tr>
+        <td>cqp</td>
+        <td>constant qp mode</td>
+    </tr>
+    <tr>
+        <td>icq</td>
+        <td>intelligent qp mode</td>
+    </tr>
+    <tr>
+        <td>qvbr</td>
+        <td>quality-defined variable bitrate</td>
+    </tr>
+        <tr>
+        <td>vbr</td>
+        <td>variable bitrate</td>
+    </tr>
+</table>
+
 ### vaapi_strict_rc_buffer
 
 <table>
@@ -2854,7 +3155,7 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td colspan="2">
             Enabling this option can avoid dropped frames over the network during scene changes, but video quality may
             be reduced during motion.
-            @note{This option only applies for H.264 and HEVC when using VA-API [encoder](#encoder) on AMD GPUs.}
+            @note{This option only applies for H.264 and HEVC when using VA-API [encoder](#encoder) on AMD GPUs (or when overriding the default rate control on other devices).}
         </td>
     </tr>
     <tr>
@@ -2868,6 +3169,101 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td colspan="2">@code{}
             vaapi_strict_rc_buffer = enabled
             @endcode</td>
+    </tr>
+</table>
+
+## Vulkan Encoder
+
+### vk_tune
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Encoder tuning preset. Low latency modes reduce encoding delay at the cost of quality.
+            @note{This option only applies when using Vulkan [encoder](#encoder).}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            2
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            vk_tune = 1
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Options</td>
+        <td>0 (default)</td>
+        <td>Let the driver decide</td>
+    </tr>
+    <tr>
+        <td></td>
+        <td>1 (hq)</td>
+        <td>High Quality</td>
+    </tr>
+    <tr>
+        <td></td>
+        <td>2 (ll)</td>
+        <td>Low Latency</td>
+    </tr>
+    <tr>
+        <td></td>
+        <td>3 (ull)</td>
+        <td>Ultra Low Latency</td>
+    </tr>
+    <tr>
+        <td></td>
+        <td>4 (lossless)</td>
+        <td>Lossless</td>
+    </tr>
+</table>
+
+### vk_rc_mode
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Rate control mode for encoding. Auto lets the driver decide.
+            @note{This option only applies when using Vulkan [encoder](#encoder).}
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            2
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            vk_rc_mode = 4
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Options</td>
+        <td>0</td>
+        <td>Auto (driver decides)</td>
+    </tr>
+    <tr>
+        <td></td>
+        <td>1</td>
+        <td>CQP (Constant QP)</td>
+    </tr>
+    <tr>
+        <td></td>
+        <td>2</td>
+        <td>CBR (Constant Bitrate)</td>
+    </tr>
+    <tr>
+        <td></td>
+        <td>4</td>
+        <td>VBR (Variable Bitrate)</td>
     </tr>
 </table>
 

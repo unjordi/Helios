@@ -26,14 +26,17 @@ using namespace std::literals;
 
 namespace upnp {
 
+  /**
+   * @brief UPnP port mapping description and lease state.
+   */
   struct mapping_t {
     struct {
       std::string wan;
       std::string lan;
       std::string proto;
-    } port;
+    } port;  ///< WAN/LAN/protocol tuple for the mapped port.
 
-    std::string description;
+    std::string description;  ///< Human-readable UPnP lease description advertised to the gateway.
   };
 
   static std::string_view status_string(int status) {
@@ -57,12 +60,15 @@ namespace upnp {
    */
   int UPNP_GetValidIGDStatus(device_t &device, urls_t *urls, IGDdatas *data, std::array<char, INET6_ADDRESS_STRLEN> &lan_addr) {
 #if (MINIUPNPC_API_VERSION >= 18)
-    return UPNP_GetValidIGD(device.get(), &urls->el, data, lan_addr.data(), lan_addr.size(), nullptr, 0);
+    return UPNP_GetValidIGD(device.get(), &urls->el, data, lan_addr.data(), (int) lan_addr.size(), nullptr, 0);
 #else
-    return UPNP_GetValidIGD(device.get(), &urls->el, data, lan_addr.data(), lan_addr.size());
+    return UPNP_GetValidIGD(device.get(), &urls->el, data, lan_addr.data(), (int) lan_addr.size());
 #endif
   }
 
+  /**
+   * @brief RAII helper that runs shutdown cleanup when destroyed.
+   */
   class deinit_t: public platf::deinit_t {
   public:
     deinit_t() {
@@ -89,9 +95,12 @@ namespace upnp {
       }
 
       // Start the mapping thread
-      upnp_thread = std::thread {&deinit_t::upnp_thread_proc, this};
+      upnp_thread = std::jthread {&deinit_t::upnp_thread_proc, this};
     }
 
+    /**
+     * @brief Destroy the UPnP deinitializer.
+     */
     ~deinit_t() {
       upnp_thread.join();
     }
@@ -119,7 +128,8 @@ namespace upnp {
       }
 
       if (data.IPv6FC.controlurl[0] != 0) {
-        int firewallEnabled, pinholeAllowed;
+        int firewallEnabled;
+        int pinholeAllowed;
 
         // Check if this firewall supports IPv6 pinholes
         err = UPNP_GetFirewallStatus(urls->controlURL_6FC, data.IPv6FC.servicetype, &firewallEnabled, &pinholeAllowed);
@@ -300,6 +310,7 @@ namespace upnp {
      * @brief Maintains UPnP port forwarding rules
      */
     void upnp_thread_proc() {
+      platf::set_thread_name("upnp");
       auto shutdown_event = mail::man->event<bool>(mail::shutdown);
       bool mapped = false;
       IGDdatas data;
@@ -362,10 +373,13 @@ namespace upnp {
       }
     }
 
-    std::vector<mapping_t> mappings;
-    std::thread upnp_thread;
+    std::vector<mapping_t> mappings;  ///< Port mappings Sunshine should keep registered with the gateway.
+    std::jthread upnp_thread;  ///< Worker thread that refreshes mappings until shutdown.
   };
 
+  /**
+   * @brief Start UPnP port mapping and return its shutdown guard.
+   */
   std::unique_ptr<platf::deinit_t> start() {
     if (!config::sunshine.flags[config::flag::UPNP]) {
       return nullptr;

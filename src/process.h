@@ -5,6 +5,10 @@
 #pragma once
 
 #ifndef __kernel_entry
+  /**
+   * @def __kernel_entry
+   * @brief Macro for kernel entry.
+   */
   #define __kernel_entry
 #endif
 
@@ -39,13 +43,25 @@
 #define REMOTE_INPUT_UUID "8CB5C136-DA67-4F99-B4A1-F9CD35005CF4"
 #define TERMINATE_APP_UUID "E16CBE1B-295D-4632-9A76-EC4180C857D3"
 
+/**
+ * @def DEFAULT_APP_IMAGE_PATH
+ * @brief Macro for DEFAULT APP IMAGE PATH.
+ */
+#define DEFAULT_APP_IMAGE_PATH SUNSHINE_ASSETS_DIR "/box.png"
+
 namespace proc {
+  /**
+   * @brief Boost.Process pipe stream used for child-process I/O.
+   */
   using file_t = util::safe_ptr_v2<FILE, int, fclose>;
 
 #ifdef _WIN32
   extern VDISPLAY::DRIVER_STATUS vDisplayDriverStatus;
 #endif
 
+  /**
+   * @brief Parsed command arguments used when launching a child process.
+   */
   typedef config::prep_cmd_t cmd_t;
 
   /**
@@ -61,8 +77,8 @@ namespace proc {
    *    filename -- The output of the commands are appended to filename
    */
   struct ctx_t {
-    std::vector<cmd_t> prep_cmds;
-    std::vector<cmd_t> state_cmds;
+    std::vector<cmd_t> prep_cmds;  ///< Prep cmds.
+    std::vector<cmd_t> state_cmds;  ///< Commands run on client state changes (on-connect/on-disconnect).
 
     /**
      * Some applications, such as Steam, either exit quickly, or keep running indefinitely.
@@ -78,39 +94,48 @@ namespace proc {
      */
     std::vector<std::string> detached;
 
-    std::string idx;
-    std::string uuid;
-    std::string name;
-    std::string cmd;
-    std::string working_dir;
-    std::string output;
-    std::string image_path;
-    std::string id;
-    std::string gamepad;
-    bool elevated;
-    bool auto_detach;
-    bool wait_all;
-    bool virtual_display;
-    bool virtual_display_primary;
-    bool use_app_identity;
-    bool per_client_app_identity;
-    bool allow_client_commands;
-    bool terminate_on_pause;
-    int  scale_factor;
-    std::chrono::seconds exit_timeout;
+    std::string idx;  ///< Index of this app within the configured app list.
+    std::string uuid;  ///< Stable UUID used to launch this app independently of its index.
+    std::string name;  ///< Human-readable name for this item.
+    std::string cmd;  ///< Command line used to launch the application.
+    std::string working_dir;  ///< Working dir.
+    std::string output;  ///< Captured output from the launched process.
+    std::string image_path;  ///< Image path.
+    std::string id;  ///< Stable identifier for the configured application.
+    std::string gamepad;  ///< Gamepad type to emulate for this app.
+    bool elevated;  ///< Whether the process should be launched elevated.
+    bool auto_detach;  ///< Whether the process should detach automatically.
+    bool wait_all;  ///< Whether Sunshine waits for all child processes.
+    bool virtual_display;  ///< Whether the app is launched on a virtual display.
+    bool virtual_display_primary;  ///< Whether the virtual display becomes the primary display.
+    bool use_app_identity;  ///< Whether the app uses its own identity for display persistence.
+    bool per_client_app_identity;  ///< Whether each client gets a separate app identity.
+    bool allow_client_commands;  ///< Whether connected clients may run commands for this app.
+    bool terminate_on_pause;  ///< Whether the app is terminated when the session is paused.
+    int scale_factor;  ///< Display scale factor applied while this app is running.
+    std::chrono::seconds exit_timeout;  ///< Exit timeout.
   };
 
+  /**
+   * @brief Tracks launched child processes and terminates them during shutdown.
+   */
   class proc_t {
   public:
     KITTY_DEFAULT_CONSTR_MOVE_THROW(proc_t)
 
-    std::string display_name;
-    std::string initial_display;
-    std::string mode_changed_display;
-    bool initial_hdr = false;
-    bool virtual_display = false;
-    bool allow_client_commands = false;
+    std::string display_name;  ///< Display currently used by the running app.
+    std::string initial_display;  ///< Display active before the app changed it.
+    std::string mode_changed_display;  ///< Display whose mode was changed for the running app.
+    bool initial_hdr = false;  ///< HDR state of the display before the app changed it.
+    bool virtual_display = false;  ///< Whether the running app uses a virtual display.
+    bool allow_client_commands = false;  ///< Whether the running app allows client-issued commands.
 
+    /**
+     * @brief Construct a process manager.
+     *
+     * @param env Environment used when launching processes.
+     * @param apps Application launch contexts.
+     */
     proc_t(
       boost::process::v1::environment &&env,
       std::vector<ctx_t> &&apps
@@ -119,9 +144,19 @@ namespace proc {
         _apps(std::move(apps)) {
     }
 
+    /**
+     * @brief Enter the input-only pseudo app (no application is launched).
+     */
     void launch_input_only();
 
-    int execute(const ctx_t& _app, std::shared_ptr<rtsp_stream::launch_session_t> launch_session);
+    /**
+     * @brief Launch the configured application process.
+     *
+     * @param app Application launch context to execute.
+     * @param launch_session Launch session.
+     * @return Process exit code or launch error status.
+     */
+    int execute(const ctx_t &app, std::shared_ptr<rtsp_stream::launch_session_t> launch_session);
 
     /**
      * @return `_app_id` if a process is running, otherwise returns `0`
@@ -130,14 +165,57 @@ namespace proc {
 
     ~proc_t();
 
+    /**
+     * @brief Return the configured applications.
+     *
+     * @return Immutable application list owned by the process manager.
+     */
     const std::vector<ctx_t> &get_apps() const;
+    /**
+     * @brief Return the configured applications.
+     *
+     * @return Mutable application list owned by the process manager.
+     */
     std::vector<ctx_t> &get_apps();
+    /**
+     * @brief Get app image.
+     *
+     * @param app_id App ID.
+     * @return Validated image path for the requested application.
+     */
     std::string get_app_image(int app_id);
+    /**
+     * @brief Get last run app name.
+     *
+     * @return Name of the most recently launched application.
+     */
     std::string get_last_run_app_name();
+    /**
+     * @brief Get the UUID of the currently running app.
+     *
+     * @return UUID of the running application, or an empty string when none is running.
+     */
     std::string get_running_app_uuid();
+    /**
+     * @brief Get the environment used to launch applications.
+     *
+     * @return Copy of the process environment.
+     */
     boost::process::v1::environment get_env();
+    /**
+     * @brief Resume a paused session (re-applies display and input state).
+     */
     void resume();
+    /**
+     * @brief Pause the running session without terminating the app.
+     */
     void pause();
+    /**
+     * @brief Terminate the launched application process.
+     *
+     * @param immediate Skip the graceful exit timeout.
+     * @param needs_refresh Whether display/app state should be refreshed afterwards.
+     */
     void terminate(bool immediate = false, bool needs_refresh = true);
 
   private:
@@ -170,12 +248,41 @@ namespace proc {
   /**
    * @brief Calculate a stable id based on name and image data
    * @return Tuple of id calculated without index (for use if no collision) and one with.
+   *
+   * @param app_name App name.
+   * @param app_image_path App image path.
+   * @param index Zero-based index of the item being addressed.
    */
   std::tuple<std::string, std::string> calculate_app_id(const std::string &app_name, std::string app_image_path, int index);
 
+  bool check_valid_png(const std::filesystem::path &path);
+  /**
+   * @brief Validate app image path.
+   *
+   * @param app_image_path Candidate image path from the application configuration.
+   * @return Existing PNG path, or the default application image when validation fails.
+   */
   std::string validate_app_image_path(std::string app_image_path);
+  /**
+   * @brief Reload the app list from disk.
+   *
+   * @param file_name File name.
+   * @param needs_terminate Whether a running app should be terminated before reloading.
+   */
   void refresh(const std::string &file_name, bool needs_terminate = true);
-  void migrate_apps(nlohmann::json* fileTree_p, nlohmann::json* inputTree_p);
+  /**
+   * @brief Migrate a legacy apps file to the current schema.
+   *
+   * @param fileTree_p Parsed apps file to migrate in place.
+   * @param inputTree_p Incoming app definitions to merge, or null.
+   */
+  void migrate_apps(nlohmann::json *fileTree_p, nlohmann::json *inputTree_p);
+  /**
+   * @brief Parse serialized text into the corresponding runtime representation.
+   *
+   * @param file_name File name.
+   * @return Parsed value or parse status.
+   */
   std::optional<proc::proc_t> parse(const std::string &file_name);
 
   /**

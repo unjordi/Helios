@@ -16,6 +16,7 @@
 #include <boost/log/expressions.hpp>
 #include <boost/log/sinks.hpp>
 #include <boost/log/sources/severity_logger.hpp>
+#include <boost/log/utility/exception_handler.hpp>
 
 // local includes
 #include "logging.h"
@@ -35,16 +36,16 @@ using namespace std::literals;
 
 namespace bl = boost::log;
 
-boost::shared_ptr<boost::log::sinks::asynchronous_sink<boost::log::sinks::text_ostream_backend>> sink;
+boost::shared_ptr<boost::log::sinks::asynchronous_sink<boost::log::sinks::text_ostream_backend>> sink;  ///< Sink.
 
-bl::sources::severity_logger<int> verbose(0);  // Dominating output
-bl::sources::severity_logger<int> debug(1);  // Follow what is happening
-bl::sources::severity_logger<int> info(2);  // Should be informed about
-bl::sources::severity_logger<int> warning(3);  // Strange events
-bl::sources::severity_logger<int> error(4);  // Recoverable errors
-bl::sources::severity_logger<int> fatal(5);  // Unrecoverable errors
+bl::sources::severity_logger<int> verbose {0};  ///< Dominating output.
+bl::sources::severity_logger<int> debug {1};  ///< Follow what is happening.
+bl::sources::severity_logger<int> info {2};  ///< Should be informed about.
+bl::sources::severity_logger<int> warning {3};  ///< Strange events.
+bl::sources::severity_logger<int> error {4};  ///< Recoverable errors.
+bl::sources::severity_logger<int> fatal {5};  ///< Unrecoverable errors.
 #ifdef SUNSHINE_TESTS
-bl::sources::severity_logger<int> tests(10);  // Automatic tests output
+bl::sources::severity_logger<int> tests {10};  ///< Automatic tests output.
 #endif
 
 BOOST_LOG_ATTRIBUTE_KEYWORD(severity, "Severity", int)
@@ -60,6 +61,9 @@ namespace logging {
     sink.reset();
   }
 
+  /**
+   * @brief Format a Boost.Log record for Sunshine log output.
+   */
   void formatter(const boost::log::record_view &view, boost::log::formatting_ostream &os) {
     constexpr const char *message = "Message";
     constexpr const char *severity = "Severity";
@@ -183,6 +187,11 @@ namespace logging {
     sink->locked_backend()->add_stream(boost::make_shared<std::ofstream>(log_file));
     sink->set_filter(severity >= min_log_level);
     sink->set_formatter(&formatter);
+
+    // Prevent the async sink's background thread from dying on backend exceptions.
+    // Without this, a single I/O error (disk full, file locked, broken stdout, etc.)
+    // kills the thread and all subsequent log records are silently lost.
+    sink->set_exception_handler(bl::make_exception_suppressor());
 
     // Flush after each log record to ensure log file contents on disk isn't stale.
     // This is particularly important when running from a Windows service.

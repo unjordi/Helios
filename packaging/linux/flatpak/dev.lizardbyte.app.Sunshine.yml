@@ -1,10 +1,14 @@
 ---
 app-id: "@PROJECT_FQDN@"
-runtime: org.freedesktop.Platform
-runtime-version: "23.08"  # requires CUDA >= 12.2
-sdk: org.freedesktop.Sdk
-sdk-extensions:
-  - org.freedesktop.Sdk.Extension.node20
+runtime: org.kde.Platform
+runtime-version: "6.10"
+sdk: org.kde.Sdk
+add-build-extensions:
+  org.freedesktop.Sdk.Extension.node20:
+    directory: lib/sdk/node20
+    version: "25.08"
+    no-autodownload: true
+    autodelete: false
 command: sunshine
 separate-locales: false
 finish-args:
@@ -12,6 +16,7 @@ finish-args:
   - --env=PULSE_PROP_media.category=Manager  # allow sunshine to manage audio sinks
   - --env=SUNSHINE_MIGRATE_CONFIG=1  # migrate config files to the new location
   - --filesystem=home  # need to save files in user's home directory
+  - --filesystem=xdg-run/pipewire-0  # required for XDG portal grab audio
   - --share=ipc  # required for X11 shared memory extension
   - --share=network  # access network
   - --socket=pulseaudio  # play sounds using pulseaudio
@@ -19,6 +24,7 @@ finish-args:
   - --socket=fallback-x11  # show windows using X11
   - --system-talk-name=org.freedesktop.Avahi  # talk to avahi on the system bus
   - --talk-name=org.freedesktop.Flatpak  # talk to flatpak on the session bus
+  - --talk-name=org.kde.StatusNotifierWatcher  # talk to system tray on the session bus
 
 cleanup:
   - /include
@@ -36,16 +42,22 @@ modules:
   - "modules/nlohmann_json.json"
 
   # Runtime dependencies
-  - shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
   - "modules/avahi.json"
   - "modules/boost.json"
   - "modules/libevdev.json"
-  - "modules/libnotify.json"
   - "modules/miniupnpc.json"
   - "modules/numactl.json"
 
   # Caching is configured until here, not including CUDA, since it is too large for GitHub cache
   - "modules/cuda.json"
+
+  # FFmpeg prebuilt binaries
+  - "modules/ffmpeg.json"
+
+  # Python PyPI build-time dependencies (e.g. jinja2 for glad generator).
+  # glad-dependencies.json is generated from uv.lock at CI time by flatpak-pip-generator
+  # and placed alongside the manifest in the build directory.
+  - "glad-dependencies.json"
 
   - name: sunshine
     builddir: true
@@ -67,13 +79,17 @@ modules:
       - -DBUILD_WERROR=ON
       - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_CUDA_COMPILER=/app/cuda/bin/nvcc
+      - -DFFMPEG_PREPARED_BINARIES=/app/ffmpeg
+      - -DGLAD_SKIP_PIP_INSTALL=ON
       - -DSUNSHINE_ASSETS_DIR=share/sunshine
       - -DSUNSHINE_BUILD_FLATPAK=ON
-      - -DSUNSHINE_EXECUTABLE_PATH=/app/bin/sunshine
+      - -DSUNSHINE_ENABLE_CUDA=ON
+      - -DSUNSHINE_ENABLE_DRM=ON
+      - -DSUNSHINE_ENABLE_KWIN=ON
+      - -DSUNSHINE_ENABLE_PORTAL=ON
       - -DSUNSHINE_ENABLE_WAYLAND=ON
       - -DSUNSHINE_ENABLE_X11=ON
-      - -DSUNSHINE_ENABLE_DRM=ON
-      - -DSUNSHINE_ENABLE_CUDA=ON
+      - -DSUNSHINE_EXECUTABLE_PATH=/app/bin/sunshine
       - -DSUNSHINE_PUBLISHER_NAME='LizardByte'
       - -DSUNSHINE_PUBLISHER_WEBSITE='https://app.lizardbyte.dev'
       - -DSUNSHINE_PUBLISHER_ISSUE_URL='https://app.lizardbyte.dev/support'

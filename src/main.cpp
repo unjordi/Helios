@@ -5,8 +5,16 @@
 // standard includes
 #include <codecvt>
 #include <csignal>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+
+#ifdef __APPLE__
+  #include <mach-o/dyld.h>
+#endif
+
+// lib includes
+#include <rs.h>
 
 // local includes
 #include "confighttp.h"
@@ -30,18 +38,25 @@
 
 #define PROBE_DISPLAY_UUID "38F72B96-B00C-4F21-8B6C-E1BFF1602B0E"
 
-extern "C" {
-#include "rswrapper.h"
-}
-
 using namespace std::literals;
 
-std::map<int, std::function<void()>> signal_handlers;
+std::map<int, std::function<void()>> signal_handlers;  ///< Signal handlers.
 
+/**
+ * @brief Forward a POSIX signal to the registered Sunshine handler.
+ *
+ * @param sig Native signal number being handled.
+ */
 void on_signal_forwarder(int sig) {
   signal_handlers.at(sig)();
 }
 
+/**
+ * @brief Register the handler invoked for a POSIX signal.
+ *
+ * @param sig Native signal number being handled.
+ * @param fn Signal handler function to install.
+ */
 template<class FN>
 void on_signal(int sig, FN &&fn) {
   signal_handlers.emplace(sig, std::forward<FN>(fn));
@@ -49,6 +64,9 @@ void on_signal(int sig, FN &&fn) {
   std::signal(sig, on_signal_forwarder);
 }
 
+/**
+ * @brief Cmd to func.
+ */
 std::map<std::string_view, std::function<int(const char *name, int argc, char **argv)>> cmd_to_func {
   {"creds"sv, [](const char *name, int argc, char **argv) {
      return args::creds(name, argc, argv);
@@ -67,6 +85,15 @@ std::map<std::string_view, std::function<int(const char *name, int argc, char **
 };
 
 #ifdef _WIN32
+/**
+ * @brief Handle Windows session-change messages for the monitor window.
+ *
+ * @param hwnd Window handle receiving the Windows control event.
+ * @param uMsg U msg.
+ * @param wParam W param.
+ * @param lParam L param.
+ * @return Process or platform callback exit code.
+ */
 LRESULT CALLBACK SessionMonitorWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
   switch (uMsg) {
     case WM_CLOSE:
@@ -87,6 +114,12 @@ LRESULT CALLBACK SessionMonitorWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, L
   }
 }
 
+/**
+ * @brief Handle Windows console control events for shutdown.
+ *
+ * @param type Protocol, message, or resource type selector.
+ * @return Process or platform callback exit code.
+ */
 WINAPI BOOL ConsoleCtrlHandler(DWORD type) {
   if (type == CTRL_CLOSE_EVENT) {
     BOOST_LOG(info) << "Console closed handler called";
@@ -97,45 +130,66 @@ WINAPI BOOL ConsoleCtrlHandler(DWORD type) {
 #endif
 
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
-constexpr bool tray_is_enabled = true;
+constexpr bool tray_is_enabled = true;  ///< Compile-time flag indicating tray support is enabled.
 #else
 constexpr bool tray_is_enabled = false;
 #endif
 
+/**
+ * @brief Run the main event loop until Sunshine is asked to exit.
+ *
+ * @param shutdown_event Shutdown event.
+ */
 void mainThreadLoop(const std::shared_ptr<safe::event_t<bool>> &shutdown_event) {
   bool run_loop = false;
 
   // Conditions that would require the main thread event loop
 #ifndef _WIN32
-  run_loop = tray_is_enabled;  // On Windows, tray runs in separate thread, so no main loop needed for tray
+  run_loop = tray_is_enabled && config::sunshine.system_tray;  // On Windows, tray runs in separate thread, so no main loop needed for tray
 #endif
 
   if (!run_loop) {
     BOOST_LOG(info) << "No main thread features enabled, skipping event loop"sv;
+    // Wait for shutdown
+    shutdown_event->view();
     return;
   }
 
   // Main thread event loop
   BOOST_LOG(info) << "Starting main loop"sv;
-  while (true) {
-    if (shutdown_event->peek()) {
-      BOOST_LOG(info) << "Shutdown event detected, breaking main loop"sv;
-      if (tray_is_enabled && config::sunshine.system_tray) {
-        system_tray::end_tray();
-      }
-      break;
-    }
-
-    if (tray_is_enabled) {
-      system_tray::process_tray_events();
-    }
-
-    // Sleep to avoid busy waiting
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
+#if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
+  while (system_tray::process_tray_events() == 0);
+#endif
+  BOOST_LOG(info) << "Main loop has exited"sv;
 }
 
+/**
+ * @brief Run the main application or worker loop.
+ *
+ * @param argc The number of arguments.
+ * @param argv The arguments.
+ * @return Process or platform callback exit code.
+ */
 int main(int argc, char *argv[]) {
+#ifdef __APPLE__
+  // Bundle assets are referenced relative to the executable
+  // (e.g. ../Resources/assets), so anchor cwd to Contents/MacOS.
+  {
+    char executable[2048];
+    uint32_t size = sizeof(executable);
+    if (_NSGetExecutablePath(executable, &size) == 0) {
+      std::error_code ec;
+      auto exec_dir = std::filesystem::weakly_canonical(std::filesystem::path {executable}, ec).parent_path();
+      if (!ec) {
+        std::filesystem::current_path(exec_dir, ec);
+      }
+      if (ec) {
+        std::cerr << "Failed to set working directory to executable path: " << ec.message() << '\n';
+      }
+    }
+  }
+#endif
+
   lifetime::argv = argv;
 
   task_pool_util::TaskPool::task_id_t force_shutdown = nullptr;
@@ -177,9 +231,7 @@ int main(int argc, char *argv[]) {
   log_publisher_data();
 
   // Log modified_config_settings
-  for (auto &[name, val] : config::modified_config_settings) {
-    BOOST_LOG(info) << "config: '"sv << name << "' = "sv << val;
-  }
+  config::log_config_settings(config::modified_config_settings, false);
   config::modified_config_settings.clear();
 
   if (!config::sunshine.cmd.name.empty()) {
@@ -228,7 +280,8 @@ int main(int argc, char *argv[]) {
   std::promise<void> session_monitor_join_thread_promise;
   auto session_monitor_join_thread_future = session_monitor_join_thread_promise.get_future();
 
-  std::thread session_monitor_thread([&]() {
+  std::jthread session_monitor_thread([&]() {
+    platf::set_thread_name("session_monitor");
     session_monitor_join_thread_promise.set_value_at_thread_exit();
 
     WNDCLASSA wnd_class {};
@@ -310,7 +363,13 @@ int main(int argc, char *argv[]) {
 
     force_shutdown = task_pool.pushDelayed(task, 10s).task_id;
 
+    // Break out of the main loop
     shutdown_event->raise(true);
+
+    if (tray_is_enabled && config::sunshine.system_tray) {
+      system_tray::end_tray();
+    }
+
     display_device_deinit_guard = nullptr;
   });
 
@@ -324,7 +383,13 @@ int main(int argc, char *argv[]) {
     };
     force_shutdown = task_pool.pushDelayed(task, 10s).task_id;
 
+    // Break out of the main loop
     shutdown_event->raise(true);
+
+    if (tray_is_enabled && config::sunshine.system_tray) {
+      system_tray::end_tray();
+    }
+
     display_device_deinit_guard = nullptr;
   });
 
@@ -427,9 +492,9 @@ int main(int argc, char *argv[]) {
     return lifetime::desired_exit_code;
   }
 
-  std::thread httpThread {nvhttp::start};
-  std::thread configThread {confighttp::start};
-  std::thread rtspThread {rtsp_stream::start};
+  std::jthread httpThread {nvhttp::start};
+  std::jthread configThread {confighttp::start};
+  std::jthread rtspThread {rtsp_stream::start};
 
 #ifdef _WIN32
   // If we're using the default port and GameStream is enabled, warn the user
@@ -443,7 +508,7 @@ int main(int argc, char *argv[]) {
     BOOST_LOG(info) << "Starting system tray"sv;
 #ifdef _WIN32
     // TODO: Windows has a weird bug where when running as a service and on the first Windows boot,
-    // he tray icon would not appear even though Sunshine is running correctly otherwise.
+    // the tray icon would not appear even though Sunshine is running correctly otherwise.
     // Restarting the service would allow the icon to appear normally.
     // For now we will keep the Windows tray icon on a separate thread.
     // Ideally, we would run the system tray on the main thread for all platforms.
@@ -454,9 +519,6 @@ int main(int argc, char *argv[]) {
   }
 
   mainThreadLoop(shutdown_event);
-
-  // Wait for shutdown, this is not necessary when we're using the main event loop
-  shutdown_event->view();
 
   httpThread.join();
   configThread.join();
@@ -470,11 +532,6 @@ int main(int argc, char *argv[]) {
   if (nvprefs_instance.owning_undo_file() && nvprefs_instance.load()) {
     nvprefs_instance.restore_global_profile();
     nvprefs_instance.unload();
-  }
-
-  // Stop the threaded tray if it was started
-  if (tray_is_enabled && config::sunshine.system_tray) {
-    system_tray::end_tray_threaded();
   }
 #endif
 

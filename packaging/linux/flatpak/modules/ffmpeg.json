@@ -1,0 +1,40 @@
+{
+  "name": "ffmpeg-prebuilt",
+  "buildsystem": "simple",
+  "build-commands": [
+    "mkdir -p /app/ffmpeg",
+    "tar -xzf ffmpeg.tar.gz -C /app/ffmpeg --strip-components=1"
+  ],
+  "sources": [
+    {
+      "type": "file",
+      "url": "https://github.com/LizardByte/build-deps/releases/download/v2026.724.203728/Linux-x86_64-ffmpeg.tar.gz",
+      "sha256": "2c27d4694b4ed0e734f497d4bd62f1b3662cbbc4ded2a69f2dc4b703441eebb3",
+      "dest-filename": "ffmpeg.tar.gz",
+      "only-arches": [
+        "x86_64"
+      ],
+      "x-checker-data": {
+        "type": "json",
+        "url": "https://api.github.com/repos/LizardByte/build-deps/releases/latest",
+        "version-query": ".tag_name",
+        "url-query": ".assets[] | select(.name==\"Linux-x86_64-ffmpeg.tar.gz\") | .browser_download_url"
+      }
+    },
+    {
+      "type": "file",
+      "url": "https://github.com/LizardByte/build-deps/releases/download/v2026.724.203728/Linux-aarch64-ffmpeg.tar.gz",
+      "sha256": "fd6492f55d79ae178db97e48d6395b4cac2a2e10b2f157b0d40355cfd7c160e8",
+      "dest-filename": "ffmpeg.tar.gz",
+      "only-arches": [
+        "aarch64"
+      ],
+      "x-checker-data": {
+        "type": "json",
+        "url": "https://api.github.com/repos/LizardByte/build-deps/releases/latest",
+        "version-query": ".tag_name",
+        "url-query": ".assets[] | select(.name==\"Linux-aarch64-ffmpeg.tar.gz\") | .browser_download_url"
+      }
+    }
+  ]
+}

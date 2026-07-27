@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import { Trash2 } from '@lucide/vue'
 import PlatformLayout from '../../../PlatformLayout.vue'
 import Checkbox from "../../../Checkbox.vue";
 
@@ -205,7 +206,7 @@ function addRemappingEntry() {
                       </td>
                       <td>
                         <button class="btn btn-danger" @click="config.dd_mode_remapping[getRemappingType()].splice(idx, 1)">
-                          <i class="fas fa-trash"></i>
+                          <Trash2 :size="16" />
                         </button>
                       </td>
                     </tr>
@@ -243,6 +244,8 @@ function addRemappingEntry() {
           {{ $t('config.dd_wa_hdr_toggle_delay_desc_3') }}
         </div> -->
       </div>
+    </template>
+    <template #freebsd>
     </template>
     <template #linux>
     </template>

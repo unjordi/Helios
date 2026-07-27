@@ -1,6 +1,10 @@
 # load common dependencies
 # this file will also load platform specific dependencies
 
+# Resolve OpenSSL before subprojects run their own find_package(OpenSSL) calls.
+# This ensures a user-provided OPENSSL_ROOT_DIR is honored consistently.
+find_package(OpenSSL REQUIRED)
+
 # boost, this should be before Simple-Web-Server as it also depends on boost
 include(dependencies/Boost_Sunshine)
 
@@ -12,12 +16,21 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/moonlight-common-c/enet")
 # web server
 add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/Simple-Web-Server")
 
+# lizardbyte common helpers
+set(LIZARDBYTE_COMMON_BUILD_TEST_SUPPORT ${BUILD_TESTS}
+        CACHE BOOL "Build lizardbyte-common GoogleTest support helpers" FORCE)
+add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/lizardbyte-common")
+
 # libdisplaydevice
 add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/libdisplaydevice")
 
+if(SUNSHINE_ENABLE_TRAY)
+    add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/tray")
+endif()
+
 # common dependencies
+include("${CMAKE_MODULE_PATH}/dependencies/nv_codec_headers.cmake")
 include("${CMAKE_MODULE_PATH}/dependencies/nlohmann_json.cmake")
-find_package(OpenSSL REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(CURL REQUIRED libcurl)
@@ -27,49 +40,16 @@ pkg_check_modules(MINIUPNP miniupnpc REQUIRED)
 include_directories(SYSTEM ${MINIUPNP_INCLUDE_DIRS})
 
 # ffmpeg pre-compiled binaries
-if(NOT DEFINED FFMPEG_PREPARED_BINARIES)
-    if(WIN32)
-        set(FFMPEG_PLATFORM_LIBRARIES mfplat ole32 strmiids mfuuid vpl)
-    elseif(UNIX AND NOT APPLE)
-        set(FFMPEG_PLATFORM_LIBRARIES numa va va-drm va-x11 X11)
-    endif()
-    set(FFMPEG_PREPARED_BINARIES
-            "${CMAKE_SOURCE_DIR}/third-party/build-deps/dist/${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+include("${CMAKE_MODULE_PATH}/dependencies/ffmpeg.cmake")
 
-    # check if the directory exists
-    if(NOT EXISTS "${FFMPEG_PREPARED_BINARIES}")
-        message(FATAL_ERROR
-                "FFmpeg pre-compiled binaries not found at ${FFMPEG_PREPARED_BINARIES}. \
-                Please consider contributing to the LizardByte/build-deps repository. \
-                Optionally, you can use the FFMPEG_PREPARED_BINARIES option to specify the path to the \
-                system-installed FFmpeg libraries")
-    endif()
-
-    if(EXISTS "${FFMPEG_PREPARED_BINARIES}/lib/libhdr10plus.a")
-        set(HDR10_PLUS_LIBRARY
-                "${FFMPEG_PREPARED_BINARIES}/lib/libhdr10plus.a")
-    endif()
-    set(FFMPEG_LIBRARIES
-            "${FFMPEG_PREPARED_BINARIES}/lib/libavcodec.a"
-            "${FFMPEG_PREPARED_BINARIES}/lib/libswscale.a"
-            "${FFMPEG_PREPARED_BINARIES}/lib/libavutil.a"
-            "${FFMPEG_PREPARED_BINARIES}/lib/libcbs.a"
-            "${FFMPEG_PREPARED_BINARIES}/lib/libSvtAv1Enc.a"
-            "${FFMPEG_PREPARED_BINARIES}/lib/libx264.a"
-            "${FFMPEG_PREPARED_BINARIES}/lib/libx265.a"
-            ${HDR10_PLUS_LIBRARY}
-            ${FFMPEG_PLATFORM_LIBRARIES})
+# Opus
+# Homebrew provides opus as a dynamic library only, so disable static linking for Homebrew builds
+if(SUNSHINE_BUILD_HOMEBREW)
+    set(OPUS_USE_STATIC OFF CACHE BOOL "Static linking for libopus")
 else()
-    set(FFMPEG_LIBRARIES
-        "${FFMPEG_PREPARED_BINARIES}/lib/libavcodec.a"
-        "${FFMPEG_PREPARED_BINARIES}/lib/libswscale.a"
-        "${FFMPEG_PREPARED_BINARIES}/lib/libavutil.a"
-        "${FFMPEG_PREPARED_BINARIES}/lib/libcbs.a"
-        ${FFMPEG_PLATFORM_LIBRARIES})
+    set(OPUS_USE_STATIC ON CACHE BOOL "Static linking for libopus")
 endif()
-
-set(FFMPEG_INCLUDE_DIRS
-        "${FFMPEG_PREPARED_BINARIES}/include")
+include("${CMAKE_MODULE_PATH}/dependencies/FindOpus.cmake")
 
 # platform specific dependencies
 if(WIN32)

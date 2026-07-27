@@ -10,6 +10,7 @@ using namespace audio;
 
 struct AudioTest: PlatformTestSuite, testing::WithParamInterface<std::tuple<std::basic_string_view<char>, config_t>> {
   void SetUp() override {
+    BaseTest::SetUp();
     m_config = std::get<1>(GetParam());
     m_mail = std::make_shared<safe::mail_raw_t>();
   }
@@ -19,7 +20,7 @@ struct AudioTest: PlatformTestSuite, testing::WithParamInterface<std::tuple<std:
 };
 
 constexpr std::bitset<config_t::MAX_FLAGS> config_flags(const int flag = -1) {
-  std::bitset<3> result = std::bitset<config_t::MAX_FLAGS>();
+  auto result = std::bitset<config_t::MAX_FLAGS>();
   if (flag >= 0) {
     result.set(flag);
   }
@@ -41,7 +42,7 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 TEST_P(AudioTest, TestEncode) {
-  std::thread timer([&] {
+  std::jthread timer([&] {
     // Terminate the audio capture after 100 ms
     std::this_thread::sleep_for(100ms);
     const auto shutdown_event = m_mail->event<bool>(mail::shutdown);
@@ -49,7 +50,7 @@ TEST_P(AudioTest, TestEncode) {
     shutdown_event->raise(true);
     audio_packets->stop();
   });
-  std::thread capture([&] {
+  std::jthread capture([&] {
     const auto packets = m_mail->queue<packet_t>(mail::audio_packets);
     const auto shutdown_event = m_mail->event<bool>(mail::shutdown);
     while (const auto packet = packets->pop()) {

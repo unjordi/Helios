@@ -67,8 +67,8 @@ namespace args {
 }  // namespace args
 
 namespace lifetime {
-  char **argv;
-  std::atomic_int desired_exit_code;
+  char **argv;  ///< Command-line argument vector.
+  std::atomic_int desired_exit_code;  ///< Desired exit code.
 
   void exit_sunshine(int exit_code, bool async) {
     // Store the exit code of the first exit_sunshine() call
@@ -123,10 +123,14 @@ bool is_gamestream_enabled() {
 }
 
 namespace service_ctrl {
+  /**
+   * @brief Owns Windows service-manager handles for the Sunshine service.
+   */
   class service_controller {
   public:
     /**
-     * @brief Constructor for service_controller class.
+     * @brief Open the Windows service manager and Sunshine service handle.
+     *
      * @param service_desired_access SERVICE_* desired access flags.
      */
     service_controller(DWORD service_desired_access) {
@@ -157,6 +161,8 @@ namespace service_ctrl {
 
     /**
      * @brief Asynchronously starts the Sunshine service.
+     *
+     * @return True when the Windows service API call succeeds.
      */
     bool start_service() {
       if (!service_handle) {
@@ -177,6 +183,8 @@ namespace service_ctrl {
     /**
      * @brief Query the service status.
      * @param status The SERVICE_STATUS struct to populate.
+     *
+     * @return True when the Windows service API call succeeds.
      */
     bool query_service_status(SERVICE_STATUS &status) {
       if (!service_handle) {
@@ -225,7 +233,7 @@ namespace service_ctrl {
     } while (sc.query_service_status(status) && status.dwCurrentState == SERVICE_START_PENDING);
 
     if (status.dwCurrentState != SERVICE_RUNNING) {
-      BOOST_LOG(error) << SERVICE_NAME " failed to start: "sv << status.dwWin32ExitCode;
+      BOOST_LOG(error) << std::format("{} failed to start: {}"sv, platf::SERVICE_NAME, status.dwWin32ExitCode);
       return false;
     }
 

@@ -47,26 +47,40 @@ using namespace std::literals;
 
 namespace nvhttp {
 
+  static constexpr std::string_view EMPTY_PROPERTY_TREE_ERROR_MSG = "Property tree is empty. Probably, control flow got interrupted by an unexpected C++ exception. This is a bug in Sunshine. Moonlight-qt will report Malformed XML (missing root element)."sv;
+
   namespace fs = std::filesystem;
   namespace pt = boost::property_tree;
 
   using p_named_cert_t = crypto::p_named_cert_t;
   using PERM = crypto::PERM;
 
+  /**
+   * @brief Persisted pairing data for the Moonlight clients known to this host.
+   */
   struct client_t {
-    std::vector<p_named_cert_t> named_devices;
+    std::vector<p_named_cert_t> named_devices;  ///< Persisted Moonlight clients allowed to pair or reconnect.
   };
 
   struct pair_session_t;
 
-  crypto::cert_chain_t cert_chain;
-  static std::string one_time_pin;
-  static std::string otp_passphrase;
-  static std::string otp_device_name;
-  static std::chrono::time_point<std::chrono::steady_clock> otp_creation_time;
+  crypto::cert_chain_t cert_chain;  ///< Certificate chain presented by the GameStream HTTPS server.
+  static std::string one_time_pin;  ///< Currently valid one-time pairing PIN, if any.
+  static std::string otp_passphrase;  ///< Passphrase bound to the active OTP pairing request.
+  static std::string otp_device_name;  ///< Device name bound to the active OTP pairing request.
+  static std::chrono::time_point<std::chrono::steady_clock> otp_creation_time;  ///< When the active OTP was issued.
 
+  /**
+   * @brief HTTPS server backend that adds Sunshine's client-certificate verification.
+   */
   class SunshineHTTPSServer: public SimpleWeb::ServerBase<SunshineHTTPS> {
   public:
+    /**
+     * @brief Initialize the HTTPS server with Sunshine's certificate and key files.
+     *
+     * @param certification_file Path to the server certificate file.
+     * @param private_key_file Path to the matching private key file.
+     */
     SunshineHTTPSServer(const std::string &certification_file, const std::string &private_key_file):
         ServerBase<SunshineHTTPS>::ServerBase(443),
         context(boost::asio::ssl::context::tls_server) {
@@ -77,12 +91,15 @@ namespace nvhttp {
       context.use_private_key_file(private_key_file, boost::asio::ssl::context::pem);
     }
 
-    std::function<bool(std::shared_ptr<Request>, SSL*)> verify;
-    std::function<void(std::shared_ptr<Response>, std::shared_ptr<Request>)> on_verify_failed;
+    std::function<bool(std::shared_ptr<Request>, SSL *)> verify;  ///< Callback that validates a client's TLS certificate (and its per-client permissions) after handshake.
+    std::function<void(std::shared_ptr<Response>, std::shared_ptr<Request>)> on_verify_failed;  ///< Handler used to return the pairing challenge when client verification fails.
 
   protected:
-    boost::asio::ssl::context context;
+    boost::asio::ssl::context context;  ///< TLS server context configured with Sunshine's certificate and protocol policy.
 
+    /**
+     * @brief Enable client-certificate verification after the listening socket is bound.
+     */
     void after_bind() override {
       if (verify) {
         context.set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert | boost::asio::ssl::verify_client_once);
@@ -94,6 +111,9 @@ namespace nvhttp {
     }
 
     // This is Server<HTTPS>::accept() with SSL validation support added
+    /**
+     * @brief Accept a pending connection and arm the server for the next client.
+     */
     void accept() override {
       auto connection = create_connection(*io_service, context);
 
@@ -138,29 +158,64 @@ namespace nvhttp {
     }
   };
 
+  /**
+   * @brief HTTPS server type used for GameStream endpoints requiring TLS.
+   */
   using https_server_t = SunshineHTTPSServer;
+  /**
+   * @brief Plain HTTP server type used for GameStream endpoints without TLS.
+   */
   using http_server_t = SimpleWeb::Server<SimpleWeb::HTTP>;
 
+  /**
+   * @brief Internal HTTPS credential paths for the configuration server.
+   */
   struct conf_intern_t {
-    std::string servercert;
-    std::string pkey;
-  } conf_intern;
+    std::string servercert;  ///< Server certificate PEM string.
+    std::string pkey;  ///< Private key PEM string or path.
+  } conf_intern;  ///< TLS credential paths loaded from Sunshine's runtime configuration.
 
   // uniqueID, session
-  std::unordered_map<std::string, pair_session_t> map_id_sess;
-  client_t client_root;
-  std::atomic<uint32_t> session_id_counter;
+  std::unordered_map<std::string, pair_session_t> map_id_sess;  ///< Pairing sessions keyed by temporary unique ID.
+  client_t client_root;  ///< In-memory representation of the paired-client database.
+  std::atomic<uint32_t> session_id_counter;  ///< Monotonic counter used to allocate GameStream session IDs.
 
+  // Set by TLS verify callback, read by launch/resume handler (single-threaded HTTPS server)
+  std::string last_verified_client_cert;  ///< Last client certificate accepted by the TLS verify callback.  // NOSONAR(cpp:S5421): intentionally mutable global
+
+  /**
+   * @brief Shared HTTPS response object passed to GameStream handlers.
+   */
   using resp_https_t = std::shared_ptr<typename SimpleWeb::ServerBase<SunshineHTTPS>::Response>;
+  /**
+   * @brief Shared HTTPS request object received by GameStream handlers.
+   */
   using req_https_t = std::shared_ptr<typename SimpleWeb::ServerBase<SunshineHTTPS>::Request>;
+  /**
+   * @brief Shared HTTP response object passed to redirect and discovery handlers.
+   */
   using resp_http_t = std::shared_ptr<typename SimpleWeb::ServerBase<SimpleWeb::HTTP>::Response>;
+  /**
+   * @brief Shared HTTP request object received by redirect and discovery handlers.
+   */
   using req_http_t = std::shared_ptr<typename SimpleWeb::ServerBase<SimpleWeb::HTTP>::Request>;
 
+  /**
+   * @brief Certificate operations supported by the pairing API.
+   */
   enum class op_e {
     ADD,  ///< Add certificate
     REMOVE  ///< Remove certificate
   };
 
+  /**
+   * @brief Read a named query argument from the HTTP request map.
+   *
+   * @param args Parsed query-string argument map.
+   * @param name Query parameter name to read.
+   * @param default_value Value returned when the parameter is absent.
+   * @return Query parameter value, default value, or an empty string.
+   */
   std::string get_arg(const args_t &args, const char *name, const char *default_value) {
     auto it = args.find(name);
     if (it == std::end(args)) {
@@ -173,8 +228,14 @@ namespace nvhttp {
     return it->second;
   }
 
-  // Helper function to extract command entries from a JSON object.
-  cmd_list_t extract_command_entries(const nlohmann::json& j, const std::string& key) {
+  /**
+   * @brief Extract a list of command entries from a JSON object.
+   *
+   * @param j JSON object holding the client entry.
+   * @param key Key of the array to read (`do` / `undo`).
+   * @return Parsed command entries; empty when the key is absent or malformed.
+   */
+  cmd_list_t extract_command_entries(const nlohmann::json &j, const std::string &key) {
     cmd_list_t commands;
 
     // Check if the key exists in the JSON.
@@ -203,6 +264,9 @@ namespace nvhttp {
     return commands;
   }
 
+  /**
+   * @brief Persist the current paired-client state to its backing store.
+   */
   void save_state() {
     nlohmann::json root = nlohmann::json::object();
     // If the state file exists, try to read it.
@@ -247,6 +311,7 @@ namespace nvhttp {
         named_cert_node["name"] = final_name;
         named_cert_node["cert"] = named_cert_p->cert;
         named_cert_node["uuid"] = named_cert_p->uuid;
+        named_cert_node["enabled"] = named_cert_p->enabled;
         named_cert_node["display_mode"] = named_cert_p->display_mode;
         named_cert_node["perm"] = static_cast<uint32_t>(named_cert_p->perm);
         named_cert_node["enable_legacy_ordering"] = named_cert_p->enable_legacy_ordering;
@@ -286,6 +351,9 @@ namespace nvhttp {
     }
   }
 
+  /**
+   * @brief Load state from its backing store.
+   */
   void load_state() {
     if (!fs::exists(config::nvhttp.file_state)) {
       BOOST_LOG(info) << "File "sv << config::nvhttp.file_state << " doesn't exist"sv;
@@ -344,6 +412,7 @@ namespace nvhttp {
         named_cert_p->name = el.value("name", "");
         named_cert_p->cert = el.value("cert", "");
         named_cert_p->uuid = el.value("uuid", "");
+        named_cert_p->enabled = el.value("enabled", true);
         named_cert_p->display_mode = el.value("display_mode", "");
         named_cert_p->perm = (PERM)(util::get_non_string_json_value<uint32_t>(el, "perm", (uint32_t)PERM::_all)) & PERM::_all;
         named_cert_p->enable_legacy_ordering = el.value("enable_legacy_ordering", true);
@@ -365,7 +434,12 @@ namespace nvhttp {
     client_root = client;
   }
 
-  void add_authorized_client(const p_named_cert_t& named_cert_p) {
+  /**
+   * @brief Add an authorized client to the paired-client database.
+   *
+   * @param named_cert_p Named client certificate (cert + per-client metadata/permissions).
+   */
+  void add_authorized_client(const p_named_cert_t &named_cert_p) {
     client_t &client = client_root;
     client.named_devices.push_back(named_cert_p);
 
@@ -379,7 +453,16 @@ namespace nvhttp {
     }
   }
 
-  std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, bool input_only, const args_t &args, const crypto::named_cert_t* named_cert_p) {
+  /**
+   * @brief Create launch session.
+   *
+   * @param host_audio Whether host audio should be played locally.
+   * @param input_only Whether the client is joining in input-only mode.
+   * @param args Arguments forwarded to the callable or parser.
+   * @param named_cert_p Named client certificate (cert + per-client metadata/permissions).
+   * @return Constructed launch session object.
+   */
+  std::shared_ptr<rtsp_stream::launch_session_t> make_launch_session(bool host_audio, bool input_only, const args_t &args, const crypto::named_cert_t *named_cert_p) {
     auto launch_session = std::make_shared<rtsp_stream::launch_session_t>();
 
     launch_session->id = ++session_id_counter;
@@ -454,16 +537,21 @@ namespace nvhttp {
     launch_session->device_name = named_cert_p->name.empty() ? "ApolloDisplay"s : named_cert_p->name;
     launch_session->unique_id = named_cert_p->uuid;
     launch_session->perm = named_cert_p->perm;
+    launch_session->appid = (int) util::from_view(get_arg(args, "appid", "0"));
     launch_session->enable_sops = util::from_view(get_arg(args, "sops", "0"));
-    launch_session->surround_info = util::from_view(get_arg(args, "surroundAudioInfo", "196610"));
+    launch_session->surround_info = (int) util::from_view(get_arg(args, "surroundAudioInfo", "196610"));
     launch_session->surround_params = (get_arg(args, "surroundParams", ""));
-    launch_session->gcmap = util::from_view(get_arg(args, "gcmap", "0"));
+    launch_session->continuous_audio = util::from_view(get_arg(args, "continuousAudio", "0"));
+    launch_session->gcmap = (int) util::from_view(get_arg(args, "gcmap", "0"));
     launch_session->enable_hdr = util::from_view(get_arg(args, "hdrMode", "0"));
     launch_session->virtual_display = util::from_view(get_arg(args, "virtualDisplay", "0")) || named_cert_p->always_use_virtual_display;
     launch_session->scale_factor = util::from_view(get_arg(args, "scaleFactor", "100"));
 
     launch_session->client_do_cmds = named_cert_p->do_cmds;
     launch_session->client_undo_cmds = named_cert_p->undo_cmds;
+
+    // Recorded by the TLS verify callback; used to terminate this client's sessions on unpair/disable.
+    launch_session->client_cert = last_verified_client_cert;
 
     launch_session->input_only = input_only;
 
@@ -474,6 +562,13 @@ namespace nvhttp {
     map_id_sess.erase(sess.client.uniqueID);
   }
 
+  /**
+   * @brief Return the GameStream pairing failure response.
+   *
+   * @param sess Pairing session that owns the request state.
+   * @param tree XML property tree used for the response body.
+   * @param status_msg Status msg.
+   */
   void fail_pair(pair_session_t &sess, pt::ptree &tree, const std::string status_msg) {
     tree.put("root.paired", 0);
     tree.put("root.<xmlattr>.status_code", 400);
@@ -482,6 +577,13 @@ namespace nvhttp {
     BOOST_LOG(warning) << "Pair attempt failed due to " << status_msg;
   }
 
+  /**
+   * @brief Return the server certificate text for pairing responses.
+   *
+   * @param sess Pairing session that owns the request state.
+   * @param tree XML property tree used for the response body.
+   * @param pin PIN supplied by the client during pairing.
+   */
   void getservercert(pair_session_t &sess, pt::ptree &tree, const std::string &pin) {
     if (sess.last_phase != PAIR_PHASE::NONE) {
       fail_pair(sess, tree, "Out of order call to getservercert");
@@ -506,6 +608,13 @@ namespace nvhttp {
     tree.put("root.<xmlattr>.status_code", 200);
   }
 
+  /**
+   * @brief Handle the client-challenge phase of GameStream pairing.
+   *
+   * @param sess Pairing session that owns the request state.
+   * @param tree XML property tree used for the response body.
+   * @param challenge Client challenge bytes from the pairing request.
+   */
   void clientchallenge(pair_session_t &sess, pt::ptree &tree, const std::string &challenge) {
     if (sess.last_phase != PAIR_PHASE::GETSERVERCERT) {
       fail_pair(sess, tree, "Out of order call to clientchallenge");
@@ -549,6 +658,13 @@ namespace nvhttp {
     tree.put("root.<xmlattr>.status_code", 200);
   }
 
+  /**
+   * @brief Handle the server-challenge response phase of GameStream pairing.
+   *
+   * @param sess Pairing session that owns the request state.
+   * @param tree XML property tree used for the response body.
+   * @param encrypted_response Encrypted response.
+   */
   void serverchallengeresp(pair_session_t &sess, pt::ptree &tree, const std::string &encrypted_response) {
     if (sess.last_phase != PAIR_PHASE::CLIENTCHALLENGE) {
       fail_pair(sess, tree, "Out of order call to serverchallengeresp");
@@ -578,6 +694,13 @@ namespace nvhttp {
     tree.put("root.<xmlattr>.status_code", 200);
   }
 
+  /**
+   * @brief Handle the client pairing-secret phase of GameStream pairing.
+   *
+   * @param sess Pairing session that owns the request state.
+   * @param tree XML property tree used for the response body.
+   * @param client_pairing_secret Client pairing secret.
+   */
   void clientpairingsecret(pair_session_t &sess, pt::ptree &tree, const std::string &client_pairing_secret) {
     if (sess.last_phase != PAIR_PHASE::SERVERCHALLENGERESP) {
       fail_pair(sess, tree, "Out of order call to clientpairingsecret");
@@ -652,21 +775,38 @@ namespace nvhttp {
   template<class T>
   struct tunnel;
 
+  /**
+   * @brief HTTPS tunnel session used for encrypted client requests.
+   */
   template<>
   struct tunnel<SunshineHTTPS> {
-    static auto constexpr to_string = "HTTPS"sv;
+    static auto constexpr to_string = "HTTPS"sv;  ///< To string.
   };
 
+  /**
+   * @brief Plain HTTP server wrapper used for non-TLS endpoints.
+   */
   template<>
   struct tunnel<SimpleWeb::HTTP> {
-    static auto constexpr to_string = "NONE"sv;
+    static auto constexpr to_string = "NONE"sv;  ///< To string.
   };
 
-  inline crypto::named_cert_t* get_verified_cert(req_https_t request) {
-    return (crypto::named_cert_t*)request->userp.get();
+  /**
+   * @brief Get the per-client certificate record attached to a verified HTTPS request.
+   *
+   * @param request HTTP request data from the client.
+   * @return Named certificate record stashed by the TLS verify callback.
+   */
+  inline crypto::named_cert_t *get_verified_cert(req_https_t request) {
+    return (crypto::named_cert_t *) request->userp.get();
   }
 
-  template <class T>
+  /**
+   * @brief Write req details to the log.
+   *
+   * @param request HTTP request data from the client.
+   */
+  template<class T>
   void print_req(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
     BOOST_LOG(debug) << "TUNNEL :: "sv << tunnel<T>::to_string;
 
@@ -686,6 +826,12 @@ namespace nvhttp {
     BOOST_LOG(debug) << " [--] "sv;
   }
 
+  /**
+   * @brief Return a GameStream HTTP not-found response.
+   *
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
   template<class T>
   void not_found(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
     print_req<T>(request);
@@ -700,7 +846,13 @@ namespace nvhttp {
     response->close_connection_after_response = true;
   }
 
-  template <class T>
+  /**
+   * @brief Dispatch the top-level GameStream pairing request by phase.
+   *
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
+  template<class T>
   void pair(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
     print_req<T>(request);
 
@@ -789,6 +941,7 @@ namespace nvhttp {
           std::getline(std::cin, pin);
 
           getservercert(ptr->second, tree, pin);
+          return;
         } else {
 #if defined SUNSHINE_TRAY && SUNSHINE_TRAY >= 1
           system_tray::update_tray_require_pin();
@@ -879,6 +1032,50 @@ namespace nvhttp {
     return true;
   }
 
+  /**
+   * @brief Get codec mode flags.
+   *
+   * @return Moonlight codec capability bitmask for the currently probed encoders.
+   */
+  uint32_t get_codec_mode_flags() {
+    uint32_t codec_mode_flags = SCM_H264;
+    if (video::last_encoder_probe_supported_yuv444_for_codec[0]) {
+      codec_mode_flags |= SCM_H264_HIGH8_444;
+    }
+    if (video::active_hevc_mode >= 2) {
+      codec_mode_flags |= SCM_HEVC;
+      if (video::last_encoder_probe_supported_yuv444_for_codec[1]) {
+        codec_mode_flags |= SCM_HEVC_REXT8_444;
+      }
+    }
+    if (video::active_hevc_mode == 3 || video::active_hevc_mode == 5) {
+      codec_mode_flags |= SCM_HEVC_MAIN10;
+    }
+    if ((video::active_hevc_mode == 4 || video::active_hevc_mode == 5) && video::last_encoder_probe_supported_yuv444_for_codec[1]) {
+      codec_mode_flags |= SCM_HEVC_REXT10_444;
+    }
+
+    if (video::active_av1_mode >= 2) {
+      codec_mode_flags |= SCM_AV1_MAIN8;
+      if (video::last_encoder_probe_supported_yuv444_for_codec[2]) {
+        codec_mode_flags |= SCM_AV1_HIGH8_444;
+      }
+    }
+    if (video::active_av1_mode == 3 || video::active_av1_mode == 5) {
+      codec_mode_flags |= SCM_AV1_MAIN10;
+    }
+    if ((video::active_av1_mode == 4 || video::active_av1_mode == 5) && video::last_encoder_probe_supported_yuv444_for_codec[2]) {
+      codec_mode_flags |= SCM_AV1_HIGH10_444;
+    }
+    return codec_mode_flags;
+  }
+
+  /**
+   * @brief Build the GameStream server-info response.
+   *
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
   template<class T>
   void serverinfo(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
     print_req<T>(request);
@@ -958,35 +1155,12 @@ namespace nvhttp {
       tree.put("root.LocalIP", net::addr_to_normalized_string(local_endpoint.address()));
     }
 
-    uint32_t codec_mode_flags = SCM_H264;
-    if (video::last_encoder_probe_supported_yuv444_for_codec[0]) {
-      codec_mode_flags |= SCM_H264_HIGH8_444;
-    }
-    if (video::active_hevc_mode >= 2) {
-      codec_mode_flags |= SCM_HEVC;
-      if (video::last_encoder_probe_supported_yuv444_for_codec[1]) {
-        codec_mode_flags |= SCM_HEVC_REXT8_444;
-      }
-    }
-    if (video::active_hevc_mode >= 3) {
-      codec_mode_flags |= SCM_HEVC_MAIN10;
-      if (video::last_encoder_probe_supported_yuv444_for_codec[1]) {
-        codec_mode_flags |= SCM_HEVC_REXT10_444;
-      }
-    }
-    if (video::active_av1_mode >= 2) {
-      codec_mode_flags |= SCM_AV1_MAIN8;
-      if (video::last_encoder_probe_supported_yuv444_for_codec[2]) {
-        codec_mode_flags |= SCM_AV1_HIGH8_444;
-      }
-    }
-    if (video::active_av1_mode >= 3) {
-      codec_mode_flags |= SCM_AV1_MAIN10;
-      if (video::last_encoder_probe_supported_yuv444_for_codec[2]) {
-        codec_mode_flags |= SCM_AV1_HIGH10_444;
-      }
-    }
+    const uint32_t codec_mode_flags = get_codec_mode_flags();
     tree.put("root.ServerCodecModeSupport", codec_mode_flags);
+
+    if (!config::nvhttp.external_ip.empty()) {
+      tree.put("root.ExternalIP", config::nvhttp.external_ip);
+    }
 
     tree.put("root.PairStatus", pair_status);
 
@@ -1021,6 +1195,7 @@ namespace nvhttp {
       nlohmann::json named_cert_node;
       named_cert_node["name"] = named_cert->name;
       named_cert_node["uuid"] = named_cert->uuid;
+      named_cert_node["enabled"] = named_cert->enabled;
       named_cert_node["display_mode"] = named_cert->display_mode;
       named_cert_node["perm"] = static_cast<uint32_t>(named_cert->perm);
       named_cert_node["enable_legacy_ordering"] = named_cert->enable_legacy_ordering;
@@ -1066,6 +1241,12 @@ namespace nvhttp {
     return named_cert_nodes;
   }
 
+  /**
+   * @brief Build the GameStream application list response.
+   *
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
   void applist(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -1122,7 +1303,7 @@ namespace nvhttp {
 
         pt::ptree app_node;
 
-        app_node.put("IsHdrSupported"s, video::active_hevc_mode == 3 ? 1 : 0);
+        app_node.put("IsHdrSupported"s, video::active_hevc_mode >= 3 ? 1 : 0);
         app_node.put("AppTitle"s, app_name);
         app_node.put("UUID", app.uuid);
         app_node.put("IDX", app.idx);
@@ -1148,12 +1329,23 @@ namespace nvhttp {
 
   }
 
+  /**
+   * @brief Launch the requested application for a GameStream session.
+   *
+   * @param host_audio Host audio.
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
   void launch(bool &host_audio, resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
     pt::ptree tree;
     auto g = util::fail_guard([&]() {
       std::ostringstream data;
+
+      if (tree.empty()) {
+        BOOST_LOG(error) << EMPTY_PROPERTY_TREE_ERROR_MSG;
+      }
 
       pt::write_xml(data, tree);
       response->write(data.str());
@@ -1345,12 +1537,23 @@ namespace nvhttp {
     rtsp_stream::launch_session_raise(launch_session);
   }
 
+  /**
+   * @brief Resume an existing GameStream session.
+   *
+   * @param host_audio Host audio.
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
   void resume(bool &host_audio, resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
     pt::ptree tree;
     auto g = util::fail_guard([&]() {
       std::ostringstream data;
+
+      if (tree.empty()) {
+        BOOST_LOG(error) << EMPTY_PROPERTY_TREE_ERROR_MSG;
+      }
 
       pt::write_xml(data, tree);
       response->write(data.str());
@@ -1456,6 +1659,12 @@ namespace nvhttp {
 #endif
   }
 
+  /**
+   * @brief Check whether cel.
+   *
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
   void cancel(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -1492,6 +1701,12 @@ namespace nvhttp {
     display_device::revert_configuration();
   }
 
+  /**
+   * @brief Return an application asset requested by the client.
+   *
+   * @param response HTTP response object to populate.
+   * @param request HTTP request data from the client.
+   */
   void appasset(resp_https_t response, req_https_t request) {
     print_req<SunshineHTTPS>(request);
 
@@ -1512,7 +1727,7 @@ namespace nvhttp {
     }
 
     auto args = request->parse_query_string();
-    auto app_image = proc::proc.get_app_image(util::from_view(get_arg(args, "appid")));
+    auto app_image = proc::proc.get_app_image((int) util::from_view(get_arg(args, "appid")));
 
     fg.disable();
 
@@ -1633,7 +1848,16 @@ namespace nvhttp {
     conf_intern.servercert = cert;
   }
 
+  /**
+   * @brief Check whether a paired client certificate is allowed to connect.
+   *
+   * @param cert_pem PEM-encoded client certificate to look up.
+   * @return True when the client certificate belongs to an enabled device.
+   */
+  bool is_client_enabled(const std::string_view cert_pem);
+
   void start() {
+    platf::set_thread_name("nvhttp");
     auto shutdown_event = mail::man->event<bool>(mail::shutdown);
 
     auto port_http = net::map_port(PORT_HTTP);
@@ -1693,6 +1917,14 @@ namespace nvhttp {
         return verified;
       }
 
+      // Check if this client is enabled
+      auto pem = crypto::pem(x509);
+      if (!is_client_enabled(pem)) {
+        BOOST_LOG(info) << "Client is disabled -- denied"sv;
+        return verified;
+      }
+
+      last_verified_client_cert = pem;
       verified = true;
       req->userp = named_cert_p;
 
@@ -1730,7 +1962,7 @@ namespace nvhttp {
     https_server.resource["^/actions/clipboard$"]["POST"] = setClipboard;
 
     https_server.config.reuse_address = true;
-    https_server.config.address = net::af_to_any_address_string(address_family);
+    https_server.config.address = net::get_bind_address(address_family);
     https_server.config.port = port_https;
 
     http_server.default_resource["GET"] = not_found<SimpleWeb::HTTP>;
@@ -1738,11 +1970,13 @@ namespace nvhttp {
     http_server.resource["^/pair$"]["GET"] = pair<SimpleWeb::HTTP>;
 
     http_server.config.reuse_address = true;
-    http_server.config.address = net::af_to_any_address_string(address_family);
+    http_server.config.address = net::get_bind_address(address_family);
     http_server.config.port = port_http;
 
     auto accept_and_run = [&](auto *http_server) {
       try {
+        std::string name = "nvhttp::" + std::to_string(http_server->config.port);
+        platf::set_thread_name(name);
         http_server->start();
       } catch (boost::system::system_error &err) {
         // It's possible the exception gets thrown after calling http_server->stop() from a different thread
@@ -1755,8 +1989,8 @@ namespace nvhttp {
         return;
       }
     };
-    std::thread ssl {accept_and_run, &https_server};
-    std::thread tcp {accept_and_run, &http_server};
+    std::jthread ssl {accept_and_run, &https_server};
+    std::jthread tcp {accept_and_run, &http_server};
 
     // Wait for any event
     shutdown_event->view();
@@ -1883,5 +2117,55 @@ namespace nvhttp {
     }
 
     return removed;
+  }
+
+  /**
+   * @brief Enable or disable a paired client without unpairing it.
+   *
+   * @param uuid Client UUID being toggled.
+   * @param enabled Whether the client should be allowed to connect.
+   * @return True when the client entry was found and updated.
+   */
+  bool set_client_enabled(const std::string_view uuid, bool enabled) {
+    client_t &client = client_root;
+    for (auto &named_cert_p : client.named_devices) {
+      if (named_cert_p->uuid == uuid) {
+        named_cert_p->enabled = enabled;
+        save_state();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * @brief Get cert by UUID.
+   *
+   * @param uuid Client UUID being looked up.
+   * @return PEM certificate for the paired client, or an empty string when unknown.
+   */
+  std::string get_cert_by_uuid(const std::string_view uuid) {
+    for (const auto &named_cert_p : client_root.named_devices) {
+      if (named_cert_p->uuid == uuid) {
+        return named_cert_p->cert;
+      }
+    }
+    return {};
+  }
+
+  /**
+   * @brief Check whether a paired client certificate is allowed to connect.
+   *
+   * @param cert_pem PEM certificate presented by the client.
+   * @return True when the client is enabled or unknown to the database.
+   */
+  bool is_client_enabled(const std::string_view cert_pem) {
+    const client_t &client = client_root;
+    for (const auto &named_cert_p : client.named_devices) {
+      if (named_cert_p->cert == cert_pem) {
+        return named_cert_p->enabled;
+      }
+    }
+    return true;
   }
 }  // namespace nvhttp
