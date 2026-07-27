@@ -114,7 +114,7 @@
     "save_failed": "Failed to save app: ",
     "save_order": "Save Order",
     "terminate_on_pause": "Terminate on Pause",
-    "terminate_on_pause_desc": "Terminate the app when all clients are disconnected.",
+    "terminate_on_pause_desc": "Terminate the app when all clients are disconnected. Enabled by default. If you turn it off, the session stays paused after a disconnect and the undo prep-commands never run, so anything the do-commands changed (display resolution, session lock) stays as the client left it until you reconnect.",
     "use_app_identity": "Use App Identity",
     "use_app_identity_desc": "Use the app's own identity while creating virtual displays instead of client's. This is useful when you want display configuration for each APP separately.",
     "virtual_display": "Always create Virtual Display",
