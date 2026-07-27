@@ -2653,6 +2653,10 @@ namespace video {
       BOOST_LOG(info) << "Color coding: " << color_coding;
       BOOST_LOG(info) << "Color depth: " << colorspace.bit_depth << "-bit";
       BOOST_LOG(info) << "Color range: " << (colorspace.full_range ? "JPEG" : "MPEG");
+      // Chroma subsampling was only ever logged on FAILURE ("YUV 4:4:4 not supported"), so a
+      // working 4:4:4 session was indistinguishable from a 4:2:0 one in the host log — you could
+      // only tell from the client UI. Log it positively alongside the other color properties.
+      BOOST_LOG(info) << "Chroma sampling: " << (config.chromaSamplingType == 1 ? "4:4:4" : "4:2:0");
     }
 
     if (dynamic_cast<const encoder_platform_formats_avcodec *>(encoder.platform_formats.get())) {
