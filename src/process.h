@@ -17,6 +17,7 @@
 #endif
 
 // standard includes
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 
@@ -218,6 +219,17 @@ namespace proc {
      */
     void terminate(bool immediate = false, bool needs_refresh = true);
 
+    /**
+     * @brief Access the lock that serializes launch/pause/terminate.
+     *
+     * Exposed so `proc::refresh()` can hold it while it swaps the global `proc` instance.
+     *
+     * @return The shared recursive mutex.
+     */
+    static std::recursive_mutex &mutex() {
+      return _mutex;
+    }
+
   private:
     int _app_id = 0;
     std::string _app_name;
@@ -240,6 +252,28 @@ namespace proc {
     file_t _pipe;
     std::vector<cmd_t>::const_iterator _app_prep_it;
     std::vector<cmd_t>::const_iterator _app_prep_begin;
+
+    /**
+     * @brief Serializes launch/pause/terminate against each other.
+     *
+     * `terminate()` is reachable from at least four threads with no synchronization: the system
+     * tray thread, the config web server thread, the nvhttp HTTPS thread (via the `/cancel`
+     * endpoint -> `rtsp_stream::terminate_sessions()`), and the session teardown path. They all
+     * walked the shared `_app_prep_it` cursor, so two concurrent terminations ran the undo
+     * commands twice and then stepped the iterator past `_app_prep_begin` -> SIGSEGV.
+     *
+     * Recursive because `pause()` calls `terminate()` when `terminate_on_pause` is set.
+     *
+     * `static inline` on purpose: `proc_t` is move-assigned when apps.json is reloaded
+     * (`proc = std::move(*proc_opt)`), and a mutex member would delete the defaulted move
+     * assignment. Keeping it out of the object also means the lock survives that reload, which
+     * is exactly what we want -- a reload racing a termination is the same class of bug.
+     * There is a single global instance (`proc::proc`), so one shared lock is the right scope.
+     */
+    static inline std::recursive_mutex _mutex;
+
+    /// Set while a termination is in flight, so a concurrent call returns instead of re-running undo.
+    bool _terminating = false;
   };
 
   boost::filesystem::path
