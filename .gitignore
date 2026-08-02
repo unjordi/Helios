@@ -57,3 +57,10 @@ node_modules/
 *.pyc
 .venv/
 venv/
+
+# Cerebro de Claude Code (memoria + skills SÍ se versionan; lo local NO)
+.claude/transcripts/
+.claude/*.jsonl
+.claude/settings.local.json
+.claude/memory/*.local.md
+.claude/worktrees/
