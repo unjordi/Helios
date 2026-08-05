@@ -109,7 +109,12 @@ namespace crypto {
     _allow_view      = view | launch,    // If no view permission is granted, disconnect the device upon permission update
     _all_actions     = list | view | launch,
 
-    _default         = view | list,      // Default permissions for new clients
+    // Default permissions for new clients: enough to actually stream and control a
+    // session out of the box (list + view + launch, plus the three input devices a
+    // desktop/handheld client always needs). Deliberately EXCLUDES the permissions
+    // that grant a client reach into the host beyond the stream itself: clipboard,
+    // file transfer and server_cmd stay opt-in, as do the touch and pen inputs.
+    _default         = list | view | launch | input_controller | input_mouse | input_kbd,
     _no              = 0,                // No permissions are granted
     _all             = _all_inputs | _all_opeiations | _all_actions, // All current permissions
   };
