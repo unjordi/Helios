@@ -48,3 +48,47 @@ TEST(CryptoTest, GeneratedCredentialsExposeSubjectAndVerifySignatures) {
   ASSERT_FALSE(signature.empty());
   ASSERT_TRUE(crypto::verify256(cert, payload, {reinterpret_cast<const char *>(signature.data()), signature.size()}));
 }
+
+namespace {
+  constexpr bool has(crypto::PERM mask, crypto::PERM bit) {
+    return static_cast<uint32_t>(mask) & static_cast<uint32_t>(bit);
+  }
+}  // namespace
+
+/**
+ * @brief A newly paired client must be able to stream without a manual permission edit.
+ *
+ * Pairing hands new clients PERM::_default (see nvhttp.cpp). When that mask lacked
+ * `launch`, pairing reported success and every subsequent app launch was rejected with
+ * an HTTP 403 that is only logged at debug level, so the failure looked like a network
+ * or host problem rather than a missing permission.
+ */
+TEST(CryptoPermTest, DefaultPermissionsCanStreamAndControlASession) {
+  constexpr auto perm = crypto::PERM::_default;
+
+  EXPECT_TRUE(has(perm, crypto::PERM::list));
+  EXPECT_TRUE(has(perm, crypto::PERM::view));
+  EXPECT_TRUE(has(perm, crypto::PERM::launch));
+  EXPECT_TRUE(has(perm, crypto::PERM::input_controller));
+  EXPECT_TRUE(has(perm, crypto::PERM::input_mouse));
+  EXPECT_TRUE(has(perm, crypto::PERM::input_kbd));
+}
+
+/**
+ * @brief Defaults must stay confined to the stream itself.
+ *
+ * Anything that reaches into the host beyond streaming stays opt-in, so that widening
+ * the defaults never silently grants a freshly paired client access to the clipboard,
+ * the filesystem or arbitrary server commands.
+ */
+TEST(CryptoPermTest, DefaultPermissionsWithholdHostReachingCapabilities) {
+  constexpr auto perm = crypto::PERM::_default;
+
+  EXPECT_FALSE(has(perm, crypto::PERM::clipboard_set));
+  EXPECT_FALSE(has(perm, crypto::PERM::clipboard_read));
+  EXPECT_FALSE(has(perm, crypto::PERM::file_upload));
+  EXPECT_FALSE(has(perm, crypto::PERM::file_dwnload));
+  EXPECT_FALSE(has(perm, crypto::PERM::server_cmd));
+  EXPECT_FALSE(has(perm, crypto::PERM::input_touch));
+  EXPECT_FALSE(has(perm, crypto::PERM::input_pen));
+}
