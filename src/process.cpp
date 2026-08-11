@@ -52,6 +52,15 @@ namespace proc {
   using namespace std::literals;
   namespace pt = boost::property_tree;
 
+  /**
+   * @brief How long a single undo prep-command may block before it is abandoned.
+   *
+   * The undo chain runs sequentially with a blocking wait, so one stuck command used to prevent
+   * every remaining undo from running (display mode and session lock stayed in their streaming
+   * state) and tripped the session watchdog, which kills the daemon with "Hang detected".
+   */
+  constexpr auto UNDO_CMD_TIMEOUT = 10s;
+
   proc_t proc;  ///< Global process registry used to track and terminate child processes.
 
   int input_only_app_id = -1;
@@ -182,6 +191,8 @@ namespace proc {
   }
 
   void proc_t::launch_input_only() {
+    std::lock_guard lock {_mutex};
+
     _app_id = input_only_app_id;
     _app_name = "Remote Input";
     _app.uuid = REMOTE_INPUT_UUID;
@@ -195,6 +206,11 @@ namespace proc {
   }
 
   int proc_t::execute(const ctx_t& app, std::shared_ptr<rtsp_stream::launch_session_t> launch_session) {
+    // Held for the whole launch: it sets up `_app_prep_it` / `_app_prep_begin`, which terminate()
+    // consumes. A launch racing a termination would otherwise leave the cursor inconsistent.
+    // Recursive, so the terminate() calls just below can re-acquire it.
+    std::lock_guard lock {_mutex};
+
     if (_app_id == input_only_app_id) {
       terminate(false, false);
       std::this_thread::sleep_for(1s);
@@ -669,6 +685,9 @@ namespace proc {
   }
 
   void proc_t::pause() {
+    // Recursive: the `terminate_on_pause` branch below re-enters through terminate().
+    std::lock_guard lock {_mutex};
+
     if (!running()) {
       BOOST_LOG(info) << "Session already stopped, do not run pause commands.";
       return;
@@ -727,6 +746,22 @@ namespace proc {
   }
 
   void proc_t::terminate(bool immediate, bool needs_refresh) {
+    // Serialize against launch/pause/other terminations. Without this, the undo commands run
+    // twice and the shared `_app_prep_it` cursor walks past `_app_prep_begin` -> SIGSEGV.
+    std::lock_guard lock {_mutex};
+
+    // A second caller that arrived while the first was still running its (blocking) undo commands
+    // must not replay them. Observed in the wild: the client's `/cancel` HTTP request racing the
+    // normal disconnect teardown.
+    if (_terminating) {
+      BOOST_LOG(debug) << "Termination already in progress, skipping duplicate request"sv;
+      return;
+    }
+    _terminating = true;
+    auto clear_terminating = util::fail_guard([this]() {
+      _terminating = false;
+    });
+
     std::error_code ec;
     placebo = false;
 
@@ -739,8 +774,14 @@ namespace proc {
 
     _env["APOLLO_APP_STATUS"] = "TERMINATING";
 
-    for (; _app_prep_it != _app_prep_begin; --_app_prep_it) {
-      auto &cmd = *(_app_prep_it - 1);
+    // Walk a LOCAL cursor and retire the shared one up front, so that even if another caller
+    // slips through in the future it cannot observe a half-consumed iterator.
+    auto undo_it = _app_prep_it;
+    const auto undo_begin = _app_prep_begin;
+    _app_prep_it = _app_prep_begin;
+
+    for (; undo_it != undo_begin; --undo_it) {
+      auto &cmd = *(undo_it - 1);
 
       if (cmd.undo_cmd.empty()) {
         continue;
@@ -756,7 +797,26 @@ namespace proc {
         BOOST_LOG(warning) << "System: "sv << ec.message();
       }
 
-      child.wait();
+      // Bounded wait. An undo command that hangs used to stall the whole chain: the remaining
+      // undos never ran (leaving display mode / session lock in the streaming state) and the
+      // session watchdog killed the daemon with "Hang detected".
+      // child::wait_for() is broken/deprecated in Boost.Process v1 (see terminate_process_group
+      // above), so poll like the rest of this file does.
+      {
+        auto deadline = std::chrono::steady_clock::now() + UNDO_CMD_TIMEOUT;
+        while (child.running() && std::chrono::steady_clock::now() < deadline) {
+          std::this_thread::sleep_for(100ms);
+        }
+        if (child.running()) {
+          BOOST_LOG(warning) << '[' << cmd.undo_cmd << "] did not exit within "sv
+                             << UNDO_CMD_TIMEOUT.count()
+                             << "s; abandoning it and continuing with the remaining undo commands"sv;
+          child.detach();
+          continue;
+        }
+      }
+
+      child.wait();  // already exited; reap it
       auto ret = child.exit_code();
 
       if (ret != 0) {
@@ -820,6 +880,13 @@ namespace proc {
     _app_id = -1;
     _app_name.clear();
     _app = {};
+    // `_app_prep_it` / `_app_prep_begin` point into `_app.prep_cmds`, which the line above just
+    // destroyed -- leaving them DANGLING, not merely stale. Re-seat them on the now-empty vector
+    // so the next terminate() compares valid iterators instead of relying on both happening to
+    // hold the same dead value. (Upstream Sunshine does not clear `_app` here, so it only has the
+    // milder stale-iterator version of this problem.)
+    _app_prep_begin = std::begin(_app.prep_cmds);
+    _app_prep_it = _app_prep_begin;
     display_name.clear();
     initial_display.clear();
     mode_changed_display.clear();
@@ -1674,6 +1741,11 @@ namespace proc {
    * @param needs_terminate Whether a running app should be terminated before reloading.
    */
   void refresh(const std::string &file_name, bool needs_terminate) {
+    // Reachable from the config web server thread while a session is tearing down on another
+    // thread. Without the lock, `proc = std::move(*proc_opt)` below can replace the whole object
+    // -- app list, prep-cmd cursor and all -- from under a running terminate().
+    std::lock_guard lock {proc_t::mutex()};
+
     if (needs_terminate) {
       proc.terminate(false, false);
     }
